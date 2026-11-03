@@ -7,12 +7,12 @@ atau password; semua koneksi berlangsung dari backend Java.
 ## Tech stack
 
 <p align="center">
-  <code>Java</code>&nbsp;&nbsp;
-  <code>Apache Spark</code>&nbsp;&nbsp;
-  <code>Hive JDBC</code>&nbsp;&nbsp;
-  <code>Node.js</code>&nbsp;&nbsp;
-  <code>JavaScript</code>&nbsp;&nbsp;
-  <code>HTML/CSS</code>
+  <img alt="Java" src="https://img.shields.io/badge/Java-ED8B00?logo=openjdk&logoColor=white" />
+  <img alt="Apache Spark" src="https://img.shields.io/badge/Apache%20Spark-E25A1C?logo=apachespark&logoColor=white" />
+  <img alt="Hive JDBC" src="https://img.shields.io/badge/Hive%20JDBC-FDEE21?logo=apache&logoColor=black" />
+  <img alt="Node.js" src="https://img.shields.io/badge/Node.js-339933?logo=nodedotjs&logoColor=white" />
+  <img alt="JavaScript" src="https://img.shields.io/badge/JavaScript-F7DF1E?logo=javascript&logoColor=black" />
+  <img alt="HTML/CSS" src="https://img.shields.io/badge/HTML%2FCSS-E34F26?logo=html5&logoColor=white" />
 </p>
 
 ## Menjalankan
