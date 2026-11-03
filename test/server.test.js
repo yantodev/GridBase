@@ -74,3 +74,12 @@ test("keeps inactive result states hidden", () => {
   assert.match(styles, /\[hidden\]\s*\{\s*display:\s*none\s*!important;/);
 });
 
+test("supports opening a transposed detail view for result rows", () => {
+  const appSource = fs.readFileSync(path.join(__dirname, "../public/app.js"), "utf8");
+  const htmlSource = fs.readFileSync(path.join(__dirname, "../public/index.html"), "utf8");
+
+  assert.match(htmlSource, /id="row-detail"/);
+  assert.ok(appSource.includes("openRowDetail(row, result.columns, tableRow)"));
+  assert.ok(appSource.includes("rowDetail.hidden = false"));
+});
+

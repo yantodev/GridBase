@@ -11,9 +11,13 @@ const resultsEmpty = document.querySelector("#results-empty");
 const resultsLoading = document.querySelector("#results-loading");
 const resultsError = document.querySelector("#results-error");
 const resultsTable = document.querySelector("#results-table-wrap");
+const rowDetail = document.querySelector("#row-detail");
+const closeRowDetailButton = document.querySelector("#close-row-detail");
+const rowDetailTable = document.querySelector("#row-detail-table-wrap");
 const toast = document.querySelector("#toast");
 const s3tablesList = document.querySelector("#s3tables-list");
 const refreshS3TablesButton = document.querySelector("#refresh-s3tables");
+let rowDetailTrigger = null;
 
 function updateEditorMeta() {
   state.query = editor.value;
@@ -41,6 +45,41 @@ function escapeSqlIdentifier(value) {
 
 function buildTableDataQuery(namespace, tableName) {
   return `SELECT * FROM \`s3tables\`.\`${escapeSqlIdentifier(namespace)}\`.\`${escapeSqlIdentifier(tableName)}\` LIMIT 1000;`;
+}
+
+function closeRowDetail(restoreFocus = true) {
+  rowDetail.hidden = true;
+  rowDetailTable.replaceChildren();
+  document.body.classList.remove("row-detail-open");
+  if (restoreFocus && rowDetailTrigger?.isConnected) rowDetailTrigger.focus();
+  rowDetailTrigger = null;
+}
+
+function openRowDetail(row, columns, trigger) {
+  rowDetailTable.replaceChildren();
+  const table = document.createElement("table");
+  table.className = "row-detail-table";
+  const tbody = document.createElement("tbody");
+  columns.forEach((column) => {
+    const tableRow = document.createElement("tr");
+    const heading = document.createElement("th");
+    heading.scope = "row";
+    heading.textContent = column;
+    const cell = document.createElement("td");
+    const value = row[column];
+    const isNull = value === null || value === undefined;
+    cell.textContent = isNull ? "NULL" : String(value);
+    if (isNull) cell.className = "row-detail-null";
+    cell.title = cell.textContent;
+    tableRow.append(heading, cell);
+    tbody.append(tableRow);
+  });
+  table.append(tbody);
+  rowDetailTable.append(table);
+  rowDetailTrigger = trigger;
+  rowDetail.hidden = false;
+  document.body.classList.add("row-detail-open");
+  closeRowDetailButton.focus();
 }
 
 function renderResults(result) {
@@ -76,6 +115,17 @@ function renderResults(result) {
     : result.rows;
   rows.forEach((row) => {
     const tableRow = document.createElement("tr");
+    if (!tableNameColumn) {
+      tableRow.tabIndex = 0;
+      tableRow.setAttribute("aria-label", "Open row detail");
+      const showRowDetail = () => openRowDetail(row, result.columns, tableRow);
+      tableRow.addEventListener("click", showRowDetail);
+      tableRow.addEventListener("keydown", (event) => {
+        if (event.key !== "Enter" && event.key !== " ") return;
+        event.preventDefault();
+        showRowDetail();
+      });
+    }
     result.columns.forEach((column) => {
       const cell = document.createElement("td");
       const value = row[column] ?? "";
@@ -224,6 +274,7 @@ function formatQuery() {
 
 async function runQuery() {
   if (state.running) return;
+  closeRowDetail(false);
   state.running = true;
   runButton.disabled = true;
   runButton.querySelector("span:nth-child(2)").textContent = "Running…";
@@ -279,12 +330,20 @@ document.querySelector("#copy-query").addEventListener("click", async () => {
   setToast("Query copied");
 });
 document.querySelector("#new-query").addEventListener("click", () => {
+  closeRowDetail(false);
   editor.value = "";
   updateEditorMeta();
   setResultMode("empty");
   editor.focus();
 });
 refreshS3TablesButton.addEventListener("click", loadS3Tables);
+closeRowDetailButton.addEventListener("click", () => closeRowDetail());
+rowDetail.addEventListener("click", (event) => {
+  if (event.target === rowDetail) closeRowDetail();
+});
+document.addEventListener("keydown", (event) => {
+  if (event.key === "Escape" && !rowDetail.hidden) closeRowDetail();
+});
 editor.addEventListener("keydown", (event) => {
   if ((event.metaKey || event.ctrlKey) && event.key === "Enter") {
     event.preventDefault();
