@@ -12,8 +12,8 @@ const resultsLoading = document.querySelector("#results-loading");
 const resultsError = document.querySelector("#results-error");
 const resultsTable = document.querySelector("#results-table-wrap");
 const toast = document.querySelector("#toast");
-const databaseList = document.querySelector("#database-list");
-const refreshDatabasesButton = document.querySelector("#refresh-databases");
+const s3tablesList = document.querySelector("#s3tables-list");
+const refreshS3TablesButton = document.querySelector("#refresh-s3tables");
 
 function updateEditorMeta() {
   state.query = editor.value;
@@ -112,7 +112,7 @@ function renderHistory() {
   });
 }
 
-function createDatabaseIcon() {
+function createS3TablesIcon() {
   const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
   svg.setAttribute("viewBox", "0 0 20 20");
   svg.setAttribute("aria-hidden", "true");
@@ -124,62 +124,62 @@ function createDatabaseIcon() {
   return svg;
 }
 
-function renderDatabaseState(message, isError = false) {
-  databaseList.replaceChildren();
+function renderS3TablesState(message, isError = false) {
+  s3tablesList.replaceChildren();
   const stateMessage = document.createElement("p");
-  stateMessage.className = `database-state${isError ? " is-error" : ""}`;
+  stateMessage.className = `s3tables-state${isError ? " is-error" : ""}`;
   stateMessage.textContent = message;
-  databaseList.append(stateMessage);
+  s3tablesList.append(stateMessage);
   if (isError) {
     const retry = document.createElement("button");
     retry.type = "button";
-    retry.className = "database-retry";
+    retry.className = "s3tables-retry";
     retry.textContent = "Try again";
-    retry.addEventListener("click", loadDatabases);
-    databaseList.append(retry);
+    retry.addEventListener("click", loadS3Tables);
+    s3tablesList.append(retry);
   }
 }
 
-function renderDatabases(databases) {
-  databaseList.replaceChildren();
-  if (!databases.length) {
-    renderDatabaseState("No databases found.");
+function renderS3Tables(namespaces) {
+  s3tablesList.replaceChildren();
+  if (!namespaces.length) {
+    renderS3TablesState("No s3tables namespaces found.");
     return;
   }
-  databases.forEach((database) => {
+  namespaces.forEach((namespace) => {
     const item = document.createElement("button");
     item.type = "button";
-    item.className = "database-item";
-    item.title = `Prepare a table query for ${database}`;
+    item.className = "s3tables-item";
+    item.title = `Prepare a table query for ${namespace}`;
     const icon = document.createElement("span");
-    icon.className = "database-icon";
-    icon.append(createDatabaseIcon());
+    icon.className = "s3tables-icon";
+    icon.append(createS3TablesIcon());
     const label = document.createElement("span");
-    label.textContent = database;
+    label.textContent = namespace;
     item.append(icon, label);
     item.addEventListener("click", () => {
-      const escapedDatabase = database.replace(/`/g, "``");
-      editor.value = `SHOW TABLES IN \`${escapedDatabase}\`;`;
+      const escapedNamespace = namespace.replace(/`/g, "``");
+      editor.value = `SHOW TABLES IN \`${escapedNamespace}\`;`;
       updateEditorMeta();
       editor.focus();
-      setToast(`Query prepared for ${database}`);
+      setToast(`Query prepared for ${namespace}`);
     });
-    databaseList.append(item);
+    s3tablesList.append(item);
   });
 }
 
-async function loadDatabases() {
-  refreshDatabasesButton.disabled = true;
-  renderDatabaseState("Loading databases…");
+async function loadS3Tables() {
+  refreshS3TablesButton.disabled = true;
+  renderS3TablesState("Loading s3tables…");
   try {
     const response = await fetch("/api/databases");
     const payload = await response.json();
-    if (!response.ok) throw new Error(payload.error || "Database tidak dapat dimuat.");
-    renderDatabases(Array.isArray(payload.databases) ? payload.databases : []);
+    if (!response.ok) throw new Error(payload.error || "s3tables tidak dapat dimuat.");
+    renderS3Tables(Array.isArray(payload.databases) ? payload.databases : []);
   } catch {
-    renderDatabaseState("Unable to load databases.", true);
+    renderS3TablesState("Unable to load s3tables.", true);
   } finally {
-    refreshDatabasesButton.disabled = false;
+    refreshS3TablesButton.disabled = false;
   }
 }
 
@@ -256,7 +256,7 @@ document.querySelector("#new-query").addEventListener("click", () => {
   setResultMode("empty");
   editor.focus();
 });
-refreshDatabasesButton.addEventListener("click", loadDatabases);
+refreshS3TablesButton.addEventListener("click", loadS3Tables);
 editor.addEventListener("keydown", (event) => {
   if ((event.metaKey || event.ctrlKey) && event.key === "Enter") {
     event.preventDefault();
@@ -275,5 +275,5 @@ document.querySelectorAll("[data-view]").forEach((button) => {
 updateEditorMeta();
 renderHistory();
 checkHealth();
-loadDatabases();
+loadS3Tables();
 
