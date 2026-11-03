@@ -21,10 +21,10 @@
         <div class="sidebar-label">Workspace</div>
         <nav class="nav-stack" aria-label="Workspace views">
           <button class="nav-item is-active" type="button" data-view="query">
-            <span class="nav-icon" aria-hidden="true">⌁</span><span>Query desk</span>
+            <span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 20 20" focusable="false"><path d="M4 5.5h12M4 10h8M4 14.5h12" /></svg></span><span>Query desk</span>
           </button>
           <button class="nav-item" type="button" data-view="history">
-            <span class="nav-icon" aria-hidden="true">◷</span><span>Run history</span>
+            <span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 20 20" focusable="false"><circle cx="10" cy="10" r="6.5" /><path d="M10 6.5v3.8l2.7 1.7" /></svg></span><span>Run history</span>
           </button>
         </nav>
 
@@ -36,7 +36,7 @@
         </div>
 
         <div class="sidebar-footer">
-          <div class="security-note"><span class="lock-dot" aria-hidden="true">⌂</span><span>Credentials stay on this server</span></div>
+          <div class="security-note"><span class="lock-dot" aria-hidden="true"><svg viewBox="0 0 20 20" focusable="false"><rect x="4.5" y="8.5" width="11" height="8" rx="1.5" /><path d="M7 8.5V6.7a3 3 0 0 1 6 0v1.8" /></svg></span><span>Credentials stay on this server</span></div>
           <div class="version">LOCAL WORKBENCH · 0.1</div>
         </div>
       </aside>
@@ -46,7 +46,7 @@
           <div class="breadcrumb"><span>Workspace</span><span class="slash">/</span><strong>Query desk</strong></div>
           <div class="topbar-actions">
             <span class="read-only-pill"><span class="status-dot"></span> Read-only mode</span>
-            <button class="icon-button" id="new-query" type="button" aria-label="New query" title="New query">＋</button>
+            <button class="icon-button" id="new-query" type="button" aria-label="New query" title="New query"><svg viewBox="0 0 20 20" focusable="false"><path d="M10 4v12M4 10h12" /></svg></button>
             <div class="avatar" aria-label="Local session">BQ</div>
           </div>
         </header>
@@ -54,7 +54,6 @@
         <div class="content-wrap">
           <section class="intro-row" aria-labelledby="page-title">
             <div class="intro-copy">
-              <p class="eyebrow">Spark Thrift Server · HTTP / TLS</p>
               <h1 id="page-title">Ask the warehouse<br /><em>better questions.</em></h1>
               <p class="intro-text">A focused desk for exploring your Spark data. Write a query, run it safely, and keep the answer close.</p>
             </div>
@@ -84,8 +83,8 @@
               <div class="editor-footer"><span>SQL · Spark dialect</span><span id="char-count">0 characters</span></div>
             </div>
             <div class="run-row">
-              <div class="safety-copy"><span class="shield-icon" aria-hidden="true">✦</span><span>Only read queries are allowed in this workspace.</span></div>
-              <button id="run-query" class="run-button" type="button"><span class="run-glyph" aria-hidden="true">▶</span><span>Run query</span><kbd>⌘↵</kbd></button>
+              <div class="safety-copy"><span class="shield-icon" aria-hidden="true"><svg viewBox="0 0 20 20" focusable="false"><path d="m10 3 5 2v4.3c0 3.1-2 5.8-5 7.7-3-1.9-5-4.6-5-7.7V5l5-2Z" /><path d="m7.5 10 1.6 1.6 3.4-3.4" /></svg></span><span>Only read queries are allowed in this workspace.</span></div>
+              <button id="run-query" class="run-button" type="button"><span class="run-glyph" aria-hidden="true"><svg viewBox="0 0 20 20" focusable="false"><path d="m7 4.7 7 5.3-7 5.3V4.7Z" /></svg></span><span>Run query</span><kbd>⌘↵</kbd></button>
             </div>
           </section>
 
