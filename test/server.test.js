@@ -1,5 +1,7 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
+const fs = require("node:fs");
+const path = require("node:path");
 const { buildBeelineArgs, createServer, DATABASE_LIST_SQL, describeBeelineSpawnError, getHealth, resolveBeelineBin } = require("../server");
 
 test("creates an HTTP server without opening a network socket", () => {
@@ -51,5 +53,11 @@ test("passes a password file path instead of a password argument", () => {
 
 test("uses the s3tables namespace query for the database list", () => {
   assert.equal(DATABASE_LIST_SQL, "SHOW NAMESPACES IN s3tables");
+});
+
+test("qualifies sidebar table queries with the s3tables catalog", () => {
+  const appSource = fs.readFileSync(path.join(__dirname, "../public/app.js"), "utf8");
+
+  assert.ok(appSource.includes("SHOW TABLES IN \\`s3tables\\`.\\`${escapedNamespace}\\`;"));
 });
 

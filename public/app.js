@@ -159,7 +159,7 @@ function renderS3Tables(namespaces) {
     item.append(icon, label);
     item.addEventListener("click", () => {
       const escapedNamespace = namespace.replace(/`/g, "``");
-      editor.value = `SHOW TABLES IN \`${escapedNamespace}\`;`;
+      editor.value = `SHOW TABLES IN \`s3tables\`.\`${escapedNamespace}\`;`;
       updateEditorMeta();
       editor.focus();
       setToast(`Query prepared for ${namespace}`);
