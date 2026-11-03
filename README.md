@@ -13,6 +13,16 @@ command -v beeline
 beeline -u "$THRIFT_JDBC_URL" -n "$THRIFT_USERNAME" -p "$THRIFT_PASSWORD"
 ```
 
+Jika command `beeline` hanya ada di instalasi Spark lokal, set path executable
+secara eksplisit sebelum menjalankan server:
+
+```bash
+export BEELINE_BIN=/home/buana/.local/opt/spark-3.5.6-bin-hadoop3/bin/beeline
+```
+
+Server juga mencoba menemukan Beeline di `PATH` dan direktori
+`/home/buana/.local/opt/spark*/bin/beeline` secara otomatis.
+
 Jika koneksi CLI sudah berhasil:
 
 ```bash

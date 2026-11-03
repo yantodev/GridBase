@@ -1,6 +1,7 @@
 const http = require("node:http");
 const fs = require("node:fs");
 const path = require("node:path");
+const os = require("node:os");
 const { spawn } = require("node:child_process");
 
 const {
@@ -26,10 +27,41 @@ function loadDotEnv(filePath = path.join(ROOT, ".env")) {
 
 loadDotEnv();
 
+function isExecutable(filePath) {
+  try {
+    return fs.statSync(filePath).isFile() && (fs.statSync(filePath).mode & 0o111) !== 0;
+  } catch {
+    return false;
+  }
+}
+
+function resolveBeelineBin(environment = process.env) {
+  if (environment.BEELINE_BIN) return environment.BEELINE_BIN;
+
+  for (const directory of (environment.PATH || "").split(path.delimiter)) {
+    if (!directory) continue;
+    const candidate = path.join(directory, "beeline");
+    if (isExecutable(candidate)) return candidate;
+  }
+
+  const sparkRoot = path.join(os.homedir(), ".local", "opt");
+  const sparkCandidates = [path.join(sparkRoot, "spark", "bin", "beeline")];
+  try {
+    const sparkDirectories = fs.readdirSync(sparkRoot)
+      .filter((name) => name.startsWith("spark-"))
+      .sort()
+      .reverse();
+    sparkDirectories.forEach((name) => sparkCandidates.push(path.join(sparkRoot, name, "bin", "beeline")));
+  } catch {
+    // Fall back to PATH when the local Spark directory is not present.
+  }
+  return sparkCandidates.find(isExecutable) || "beeline";
+}
+
 const config = {
   port: Number(process.env.PORT || 4173),
   host: process.env.HOST || "127.0.0.1",
-  beelineBin: process.env.BEELINE_BIN || "beeline",
+  beelineBin: resolveBeelineBin(),
   jdbcUrl: process.env.THRIFT_JDBC_URL || "",
   username: process.env.THRIFT_USERNAME || "",
   password: process.env.THRIFT_PASSWORD || "",
@@ -74,6 +106,28 @@ function getHealth() {
   };
 }
 
+function describeBeelineSpawnError(error, binary = config.beelineBin) {
+  if (error?.code === "ENOENT") {
+    return `Beeline executable tidak ditemukan: ${binary}. Set BEELINE_BIN ke path executable Beeline, lalu restart server.`;
+  }
+  if (error?.code === "EACCES") {
+    return `Beeline executable tidak bisa dijalankan: ${binary}. Periksa permission executable file tersebut.`;
+  }
+  return "Beeline tidak bisa dijalankan. Periksa BEELINE_BIN dan PATH server.";
+}
+
+function buildBeelineArgs({ jdbcUrl, username, passwordFile }) {
+  return [
+    "-u", jdbcUrl,
+    "-n", username,
+    "-w", passwordFile,
+    "--silent=true",
+    "--showHeader=true",
+    "--outputformat=csv2",
+    "--verbose=false",
+  ];
+}
+
 function readJsonBody(request) {
   return new Promise((resolve, reject) => {
     let body = "";
@@ -106,15 +160,22 @@ function runBeeline(sql) {
   }
 
   return new Promise((resolve, reject) => {
-    const args = [
-      "-u", config.jdbcUrl,
-      "-n", config.username,
-      "-p", config.password,
-      "--silent=true",
-      "--showHeader=true",
-      "--outputformat=csv2",
-      "--verbose=false",
-    ];
+    const passwordDirectory = fs.mkdtempSync(path.join(os.tmpdir(), "thrift-query-"));
+    const passwordFile = path.join(passwordDirectory, "password");
+    fs.writeFileSync(passwordFile, config.password, { mode: 0o600 });
+    fs.chmodSync(passwordFile, 0o600);
+    const cleanupPasswordFile = () => {
+      try {
+        fs.rmSync(passwordDirectory, { recursive: true, force: true });
+      } catch {
+        // Best-effort cleanup; the temporary directory is uniquely scoped.
+      }
+    };
+    const args = buildBeelineArgs({
+      jdbcUrl: config.jdbcUrl,
+      username: config.username,
+      passwordFile,
+    });
     const child = spawn(config.beelineBin, args, {
       cwd: ROOT,
       env: { ...process.env },
@@ -136,10 +197,15 @@ function runBeeline(sql) {
     child.stderr.on("data", (chunk) => { stderr += chunk; });
     child.on("error", (error) => {
       clearTimeout(timeout);
-      reject(Object.assign(new Error("Beeline could not be started"), { cause: error }));
+      cleanupPasswordFile();
+      const spawnError = new Error(describeBeelineSpawnError(error));
+      spawnError.code = error.code === "ENOENT" ? "BEELINE_NOT_FOUND" : error.code === "EACCES" ? "BEELINE_NOT_EXECUTABLE" : "BEELINE_START_FAILED";
+      spawnError.cause = error;
+      reject(spawnError);
     });
     child.on("close", (code) => {
       clearTimeout(timeout);
+      cleanupPasswordFile();
       if (timedOut) {
         reject(Object.assign(new Error("Query timed out"), { code: "TIMEOUT" }));
         return;
@@ -186,7 +252,7 @@ async function handleQuery(request, response) {
       truncated: parsed.rows.length > rows.length,
     });
   } catch (error) {
-    const statusCode = error.code === "TIMEOUT" ? 504 : error.code === "NOT_CONFIGURED" ? 503 : 502;
+    const statusCode = error.code === "TIMEOUT" ? 504 : ["NOT_CONFIGURED", "BEELINE_NOT_FOUND", "BEELINE_NOT_EXECUTABLE"].includes(error.code) ? 503 : 502;
     if (error.code === "BEELINE_FAILED" && error.detail) {
       console.error("Beeline query failed:", error.detail);
     } else {
@@ -197,6 +263,8 @@ async function handleQuery(request, response) {
         ? "Query melewati batas waktu. Coba persempit filter atau batasi jumlah baris."
         : error.code === "NOT_CONFIGURED"
           ? "Koneksi database belum dikonfigurasi di server."
+          : ["BEELINE_NOT_FOUND", "BEELINE_NOT_EXECUTABLE"].includes(error.code)
+            ? error.message
           : "Query gagal dijalankan. Periksa koneksi dan kredensial Beeline.",
     });
   }
@@ -251,16 +319,20 @@ function createServer() {
 if (require.main === module) {
   createServer().listen(config.port, config.host, () => {
     console.log(`Thrift Query Workbench running at http://${config.host}:${config.port}`);
+    console.log(`Beeline executable: ${config.beelineBin}`);
   });
 }
 
 module.exports = {
   config,
   createServer,
+  buildBeelineArgs,
+  describeBeelineSpawnError,
   getHealth,
   handleQuery,
   parseCsv,
   readJsonBody,
+  resolveBeelineBin,
   runBeeline,
 };
 
