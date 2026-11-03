@@ -20,6 +20,8 @@ ENV HOST=0.0.0.0 \
     PORT=4173 \
     QUERY_TIMEOUT_MS=30000 \
     MAX_QUERY_ROWS=1000 \
+    SPARK_HOME=/opt/spark \
+    PATH=/opt/spark/bin:/opt/spark/sbin:$PATH \
     LANG=C.UTF-8 \
     LC_ALL=C.UTF-8
 
@@ -28,14 +30,16 @@ RUN apt-get update \
     && rm -rf /var/lib/apt/lists/* \
     && groupadd --system --gid 10001 thriftquery \
     && useradd --system --uid 10001 --gid thriftquery --create-home --home-dir /app thriftquery \
-    && mkdir -p /app/build/java /opt/spark/jars \
+    && mkdir -p /app/build/java /opt/spark/work-dir \
     && chown -R thriftquery:thriftquery /app
 
 WORKDIR /app
 
 COPY --from=build --chown=thriftquery:thriftquery /out/java /app/build/java
-COPY --from=spark /opt/spark/jars/ /opt/spark/jars/
+COPY --from=spark /opt/spark /opt/spark
 COPY --chown=thriftquery:thriftquery public /app/public
+
+RUN chown -R thriftquery:thriftquery /opt/spark/work-dir
 
 USER thriftquery
 

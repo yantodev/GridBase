@@ -37,11 +37,18 @@ npm start
 
 ## Docker Compose
 
-Docker Compose menyediakan Java runtime dan Hive JDBC client secara otomatis.
-Spark Thrift Server tetap menjadi service eksternal yang diakses melalui JDBC.
+Docker Compose menyediakan Java runtime, distribusi Apache Spark 3.5.6 lengkap,
+dan Hive JDBC client secara otomatis. Spark Thrift Server tetap menjadi service
+eksternal yang diakses melalui JDBC.
 
 ```bash
 docker compose up --build -d
+```
+
+Distribusi Spark di dalam container dapat diverifikasi dengan:
+
+```bash
+docker compose exec thrift-query spark-submit --version
 ```
 
 Untuk menggunakan port host lain:

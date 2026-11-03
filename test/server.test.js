@@ -117,6 +117,8 @@ test("provides a credential-free Docker Compose runtime", () => {
   assert.match(composeSource, /THRIFT_QUERY_PORT:-4173\}:4173/);
   assert.doesNotMatch(composeSource, /THRIFT_(?:JDBC_URL|USERNAME|PASSWORD)/);
   assert.match(dockerfileSource, /FROM apache\/spark:3\.5\.6 AS spark/);
+  assert.match(dockerfileSource, /SPARK_HOME=\/opt\/spark/);
+  assert.match(dockerfileSource, /COPY --from=spark \/opt\/spark \/opt\/spark/);
   assert.match(dockerfileSource, /HEALTHCHECK/);
 });
 
