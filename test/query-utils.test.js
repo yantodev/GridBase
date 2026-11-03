@@ -30,6 +30,15 @@ test("parses quoted commas and escaped quotes from Beeline CSV output", () => {
   assert.deepEqual(result.rows, [{ id: "1", name: "Ari, Bima", note: 'He said "hello"' }]);
 });
 
+test("keeps a quoted multiline cell in one result row", () => {
+  const result = parseCsv('id,note\n1,"line one\nline two"\n2,done');
+
+  assert.deepEqual(result.rows, [
+    { id: "1", note: "line one\nline two" },
+    { id: "2", note: "done" },
+  ]);
+});
+
 test("redacts credentials embedded in a JDBC URL", () => {
   assert.equal(
     redactJdbcUrl("jdbc:hive2://host/default;password=super-secret;ssl=true"),

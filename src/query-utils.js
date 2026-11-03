@@ -63,18 +63,44 @@ function parseCsvLine(line) {
 }
 
 function parseCsv(text) {
-  const lines = text
-    .split(/\r?\n/)
-    .map((line) => line.trimEnd())
-    .filter((line) => line.length > 0);
+  const records = [];
+  let record = [];
+  let cell = "";
+  let quoted = false;
 
-  if (lines.length === 0) {
+  for (let index = 0; index < text.length; index += 1) {
+    const char = text[index];
+    if (char === '"') {
+      if (quoted && text[index + 1] === '"') {
+        cell += '"';
+        index += 1;
+      } else {
+        quoted = !quoted;
+      }
+    } else if (char === "," && !quoted) {
+      record.push(cell);
+      cell = "";
+    } else if (char === "\n" && !quoted) {
+      record.push(cell.replace(/\r$/, ""));
+      if (record.some((value) => value.length > 0)) records.push(record);
+      record = [];
+      cell = "";
+    } else {
+      cell += char;
+    }
+  }
+
+  if (cell.length > 0 || record.length > 0) {
+    record.push(cell.replace(/\r$/, ""));
+    if (record.some((value) => value.length > 0)) records.push(record);
+  }
+
+  if (records.length === 0) {
     return { columns: [], rows: [] };
   }
 
-  const columns = parseCsvLine(lines[0]);
-  const rows = lines.slice(1).map((line) => {
-    const values = parseCsvLine(line);
+  const columns = records[0];
+  const rows = records.slice(1).map((values) => {
     return columns.reduce((record, column, index) => {
       record[column || `column_${index + 1}`] = values[index] ?? "";
       return record;
