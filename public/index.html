@@ -1,0 +1,115 @@
+<!doctype html>
+<html lang="id">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="theme-color" content="#0b1320" />
+    <title>Thrift Query Workbench</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <aside class="sidebar" aria-label="Navigasi workbench">
+        <div class="brand-lockup">
+          <div class="brand-mark" aria-hidden="true"><span></span><span></span><span></span></div>
+          <div>
+            <div class="brand-name">thrift</div>
+            <div class="brand-subtitle">query workbench</div>
+          </div>
+        </div>
+
+        <div class="sidebar-label">Workspace</div>
+        <nav class="nav-stack" aria-label="Workspace views">
+          <button class="nav-item is-active" type="button" data-view="query">
+            <span class="nav-icon" aria-hidden="true">⌁</span><span>Query desk</span>
+          </button>
+          <button class="nav-item" type="button" data-view="history">
+            <span class="nav-icon" aria-hidden="true">◷</span><span>Run history</span>
+          </button>
+        </nav>
+
+        <div class="history-block">
+          <div class="sidebar-label history-heading"><span>Recent queries</span><span id="history-count">0</span></div>
+          <div id="history-list" class="history-list" aria-live="polite">
+            <p class="history-empty">Your recent runs will appear here.</p>
+          </div>
+        </div>
+
+        <div class="sidebar-footer">
+          <div class="security-note"><span class="lock-dot" aria-hidden="true">⌂</span><span>Credentials stay on this server</span></div>
+          <div class="version">LOCAL WORKBENCH · 0.1</div>
+        </div>
+      </aside>
+
+      <main class="workspace">
+        <header class="topbar">
+          <div class="breadcrumb"><span>Workspace</span><span class="slash">/</span><strong>Query desk</strong></div>
+          <div class="topbar-actions">
+            <span class="read-only-pill"><span class="status-dot"></span> Read-only mode</span>
+            <button class="icon-button" id="new-query" type="button" aria-label="New query" title="New query">＋</button>
+            <div class="avatar" aria-label="Local session">BQ</div>
+          </div>
+        </header>
+
+        <div class="content-wrap">
+          <section class="intro-row" aria-labelledby="page-title">
+            <div class="intro-copy">
+              <p class="eyebrow">Spark Thrift Server · HTTP / TLS</p>
+              <h1 id="page-title">Ask the warehouse<br /><em>better questions.</em></h1>
+              <p class="intro-text">A focused desk for exploring your Spark data. Write a query, run it safely, and keep the answer close.</p>
+            </div>
+            <div class="connection-card" aria-label="Connection status">
+              <div class="connection-card-top"><span class="connection-kicker">CONNECTED TO</span><span id="health-badge" class="health-badge is-pending">checking</span></div>
+              <div class="connection-host" id="connection-host">Spark Thrift Server</div>
+              <div class="connection-meta"><span class="mini-dot"></span><span id="connection-detail">Checking server configuration…</span></div>
+            </div>
+          </section>
+
+          <section class="query-section" aria-labelledby="query-heading">
+            <div class="section-heading">
+              <div><span class="section-index">01</span><h2 id="query-heading">Compose a query</h2></div>
+              <span class="shortcut-hint"><kbd>⌘</kbd><kbd>↵</kbd> to run</span>
+            </div>
+            <div class="editor-card">
+              <div class="editor-toolbar">
+                <div class="file-tab"><span class="file-dot"></span>untitled.sql</div>
+                <div class="editor-actions"><button id="format-query" class="text-button" type="button">Format</button><button id="copy-query" class="text-button" type="button">Copy</button></div>
+              </div>
+              <div class="editor-body">
+                <div id="line-numbers" class="line-numbers" aria-hidden="true">1</div>
+                <textarea id="sql-editor" spellcheck="false" aria-label="SQL query editor">SELECT
+  current_date() AS today,
+  current_database() AS database;</textarea>
+              </div>
+              <div class="editor-footer"><span>SQL · Spark dialect</span><span id="char-count">0 characters</span></div>
+            </div>
+            <div class="run-row">
+              <div class="safety-copy"><span class="shield-icon" aria-hidden="true">✦</span><span>Only read queries are allowed in this workspace.</span></div>
+              <button id="run-query" class="run-button" type="button"><span class="run-glyph" aria-hidden="true">▶</span><span>Run query</span><kbd>⌘↵</kbd></button>
+            </div>
+          </section>
+
+          <section class="results-section" aria-labelledby="results-heading">
+            <div class="section-heading results-heading">
+              <div><span class="section-index">02</span><h2 id="results-heading">Results</h2></div>
+              <div class="result-metrics" aria-live="polite"><span id="row-count">— rows</span><span class="metric-separator">·</span><span id="duration">—</span></div>
+            </div>
+            <div id="results-panel" class="results-panel">
+              <div id="results-empty" class="results-empty">
+                <div class="empty-orbit" aria-hidden="true"><span></span><span></span><span></span></div>
+                <h3>Nothing queried yet</h3>
+                <p>Your result set will settle here.<br />Start with the sample query above.</p>
+              </div>
+              <div id="results-loading" class="results-loading" hidden><span class="loading-bar"></span><span class="loading-bar"></span><span class="loading-bar"></span><p>Asking Spark for an answer…</p></div>
+              <div id="results-error" class="results-error" role="alert" hidden><div class="error-icon" aria-hidden="true">!</div><div><h3>Query could not run</h3><p id="error-message">Check the connection and try again.</p></div></div>
+              <div id="results-table-wrap" class="results-table-wrap" hidden></div>
+            </div>
+          </section>
+        </div>
+        <footer class="page-footer"><span>Run locally · results are not persisted</span><span id="toast" role="status" aria-live="polite"></span></footer>
+      </main>
+    </div>
+    <script src="/app.js" defer></script>
+  </body>
+</html>
+

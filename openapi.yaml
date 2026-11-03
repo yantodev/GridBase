@@ -1,0 +1,77 @@
+openapi: 3.0.3
+info:
+  title: Thrift Query Workbench API
+  version: 0.1.0
+  description: Local API for executing read-only SQL through Beeline.
+servers:
+  - url: http://localhost:4173
+paths:
+  /api/health:
+    get:
+      summary: Return non-sensitive connection metadata
+      responses:
+        '200':
+          description: Service status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthResponse'
+  /api/query:
+    post:
+      summary: Execute a read-only SQL query through Beeline
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/QueryRequest'
+      responses:
+        '200':
+          description: Query result
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/QueryResponse'
+        '400':
+          description: Invalid query
+        '422':
+          description: Query is not allowed in read-only mode
+        '504':
+          description: Query timed out
+components:
+  schemas:
+    QueryRequest:
+      type: object
+      required: [sql]
+      properties:
+        sql:
+          type: string
+          maxLength: 20000
+          example: SELECT current_date;
+    QueryResponse:
+      type: object
+      required: [columns, rows, rowCount, durationMs]
+      properties:
+        columns:
+          type: array
+          items: { type: string }
+        rows:
+          type: array
+          items:
+            type: object
+            additionalProperties: { type: string }
+        rowCount:
+          type: integer
+        durationMs:
+          type: integer
+        truncated:
+          type: boolean
+    HealthResponse:
+      type: object
+      required: [status, configured, readOnly]
+      properties:
+        status: { type: string, enum: [ok, degraded] }
+        configured: { type: boolean }
+        readOnly: { type: boolean }
+        target: { type: string, nullable: true }
+

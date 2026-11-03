@@ -1,0 +1,13 @@
+{
+  "name": "thrift-query-workbench",
+  "version": "0.1.0",
+  "private": true,
+  "description": "A local, read-only query workbench for Spark Thrift Server.",
+  "type": "commonjs",
+  "scripts": {
+    "start": "node server.js",
+    "test": "node test/query-utils.test.js && node test/server.test.js",
+    "check": "node --check server.js && node --check src/query-utils.js && node --check public/app.js"
+  }
+}
+
