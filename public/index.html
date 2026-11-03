@@ -64,15 +64,21 @@
         </header>
 
         <div class="content-wrap">
-          <section class="intro-row" aria-labelledby="page-title">
-            <div class="intro-copy">
-              <h1 id="page-title">Ask the warehouse<br /><em>better questions.</em></h1>
-              <p class="intro-text">A focused desk for exploring your Spark data. Write a query, run it safely, and keep the answer close.</p>
+          <section class="workspace-overview" aria-labelledby="page-title">
+            <div class="workspace-overview-main">
+              <div class="workspace-signal" aria-hidden="true"><span></span><span></span><span></span></div>
+              <div>
+                <h1 id="page-title">Query studio</h1>
+                <p class="workspace-subtitle">A focused workspace for exploring Spark data.</p>
+              </div>
             </div>
-            <div class="connection-card" aria-label="Connection status">
-              <div class="connection-card-top"><span class="connection-kicker">CONNECTED TO</span><span id="health-badge" class="health-badge is-pending">checking</span></div>
-              <div class="connection-host" id="connection-host">Spark Thrift Server</div>
-              <div class="connection-meta"><span class="mini-dot"></span><span id="connection-detail">Checking server configuration…</span></div>
+            <div class="workspace-overview-side">
+              <div class="catalog-chip"><span>Catalog</span><strong>s3tables</strong></div>
+              <div class="connection-card" aria-label="Connection status">
+                <div class="connection-card-top"><span class="connection-kicker">CONNECTED TO</span><span id="health-badge" class="health-badge is-pending">checking</span></div>
+                <div class="connection-host" id="connection-host">Spark Thrift Server</div>
+                <div class="connection-meta"><span class="mini-dot"></span><span id="connection-detail">Checking server configuration…</span></div>
+              </div>
             </div>
           </section>
 
