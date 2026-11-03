@@ -132,8 +132,26 @@
             </div>
           </section>
         </div>
-        <footer class="page-footer"><span>Run locally · results are not persisted</span><span id="toast" role="status" aria-live="polite"></span></footer>
+        <footer class="page-footer"><span>Run locally · results are not persisted · history stays in this browser</span><span id="toast" role="status" aria-live="polite"></span></footer>
       </main>
+    </div>
+    <div id="setup-gate" class="setup-gate" hidden>
+      <section class="setup-card" role="dialog" aria-modal="true" aria-labelledby="setup-heading" aria-describedby="setup-description">
+        <div class="setup-card-header">
+          <span class="setup-kicker">FIRST SESSION</span>
+          <span class="setup-lock" aria-hidden="true">●</span>
+        </div>
+        <h2 id="setup-heading">Connect your Spark warehouse</h2>
+        <p id="setup-description">Enter the JDBC connection details to start this local workbench. They are kept in server memory for this session and are never saved in browser storage.</p>
+        <form id="setup-form" class="setup-form">
+          <label class="setup-field" for="setup-jdbc-url"><span>THRIFT_JDBC_URL</span><input id="setup-jdbc-url" name="jdbcUrl" type="text" inputmode="url" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" placeholder="jdbc:hive2://host:443/default;..." required /></label>
+          <label class="setup-field" for="setup-username"><span>THRIFT_USERNAME</span><input id="setup-username" name="username" type="text" autocomplete="off" autocapitalize="off" autocorrect="off" required /></label>
+          <label class="setup-field" for="setup-password"><span>THRIFT_PASSWORD</span><input id="setup-password" name="password" type="password" autocomplete="new-password" required /></label>
+          <p id="setup-error" class="setup-error" role="alert" hidden></p>
+          <button id="setup-submit" class="setup-submit" type="submit"><span>Connect to Spark</span><span aria-hidden="true">↗</span></button>
+        </form>
+        <p class="setup-note">For security, restarting the server clears these credentials and asks for them again.</p>
+      </section>
     </div>
     <script src="/app.js" defer></script>
   </body>

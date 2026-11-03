@@ -16,6 +16,27 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HealthResponse'
+  /api/setup:
+    post:
+      summary: Configure the in-memory JDBC session
+      description: Accepts the JDBC URL, username, and password from the local setup screen. Values are held only by the running Java process and are never returned in the response or stored in browser storage.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SetupRequest'
+      responses:
+        '200':
+          description: Session configured; response contains the same non-sensitive health metadata as GET /api/health.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthResponse'
+        '400':
+          description: Invalid JSON request
+        '422':
+          description: Missing or invalid JDBC setup values
   /api/query:
     post:
       summary: Execute a read-only SQL query through Java Hive JDBC
@@ -75,6 +96,24 @@ paths:
           description: Database lookup timed out
 components:
   schemas:
+    SetupRequest:
+      type: object
+      required: [jdbcUrl, username, password]
+      properties:
+        jdbcUrl:
+          type: string
+          maxLength: 2048
+          pattern: '^jdbc:hive2://'
+          example: jdbc:hive2://spark.example:443/default;transportMode=http
+        username:
+          type: string
+          maxLength: 256
+          example: reader
+        password:
+          type: string
+          maxLength: 2048
+          format: password
+          writeOnly: true
     QueryRequest:
       type: object
       required: [sql]

@@ -25,7 +25,7 @@ public final class JdbcService {
         Class.forName(HIVE_DRIVER);
         long startedAt = System.currentTimeMillis();
 
-        try (Connection connection = DriverManager.getConnection(config.jdbcUrl, config.username, config.password);
+        try (Connection connection = DriverManager.getConnection(config.jdbcUrl(), config.username(), config.password());
              Statement statement = connection.createStatement()) {
             try {
                 connection.setReadOnly(true);

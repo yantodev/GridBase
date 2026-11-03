@@ -14,6 +14,7 @@ javac --add-modules jdk.httpserver -d "$BUILD_DIR" "${JAVA_SOURCES[@]}"
 
 java -ea --add-modules jdk.httpserver -cp "$BUILD_DIR" com.peentar.thriftquery.SqlPolicyTest
 java -ea --add-modules jdk.httpserver -cp "$BUILD_DIR" com.peentar.thriftquery.JsonUtilTest
+java -ea --add-modules jdk.httpserver -cp "$BUILD_DIR" com.peentar.thriftquery.AppConfigTest
 java -ea --add-modules jdk.httpserver -cp "$BUILD_DIR" com.peentar.thriftquery.JdbcServiceTest
 java --add-modules jdk.httpserver -cp "$BUILD_DIR:$SPARK_ROOT/jars/*" com.peentar.thriftquery.JdbcDriverTest
 

@@ -50,6 +50,7 @@ public final class ThriftQueryServer {
     private void start() throws IOException {
         server = HttpServer.create(new InetSocketAddress(config.host, config.port), 0);
         server.createContext("/api/health", this::health);
+        server.createContext("/api/setup", this::setup);
         server.createContext("/api/query", this::query);
         server.createContext("/api/databases", this::databases);
         server.createContext("/api/namespaces", this::namespaces);
@@ -70,11 +71,37 @@ public final class ThriftQueryServer {
             methodNotAllowed(exchange);
             return;
         }
+        sendJson(exchange, 200, healthPayload());
+    }
+
+    private void setup(HttpExchange exchange) throws IOException {
+        if (!"POST".equals(exchange.getRequestMethod())) {
+            methodNotAllowed(exchange);
+            return;
+        }
+        try {
+            String body = readBody(exchange);
+            config.configure(
+                    JsonUtil.stringField(body, "jdbcUrl"),
+                    JsonUtil.stringField(body, "username"),
+                    JsonUtil.stringField(body, "password")
+            );
+            sendJson(exchange, 200, healthPayload());
+        } catch (IllegalArgumentException error) {
+            sendJson(exchange, 422, error(error.getMessage()));
+        } catch (IOException error) {
+            sendJson(exchange, 400, error("Request tidak valid."));
+        } finally {
+            exchange.close();
+        }
+    }
+
+    private String healthPayload() {
         String status = config.configured() ? "ok" : "degraded";
-        sendJson(exchange, 200, "{\"status\":" + JsonUtil.quote(status)
+        return "{\"status\":" + JsonUtil.quote(status)
                 + ",\"configured\":" + config.configured()
                 + ",\"readOnly\":true"
-                + ",\"target\":" + JsonUtil.quote(config.redactedTarget()) + "}");
+                + ",\"target\":" + JsonUtil.quote(config.redactedTarget()) + "}";
     }
 
     private void query(HttpExchange exchange) throws IOException {

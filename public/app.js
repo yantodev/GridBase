@@ -1,7 +1,36 @@
+const HISTORY_STORAGE_KEY = "thrift-query-workbench:history:v1";
+const MAX_HISTORY_ITEMS = 5;
+
+function loadHistory() {
+  try {
+    const parsed = JSON.parse(window.localStorage.getItem(HISTORY_STORAGE_KEY) || "[]");
+    if (!Array.isArray(parsed)) return [];
+    return parsed
+      .filter((item) => item && typeof item.sql === "string" && item.sql.trim() && Number.isFinite(item.rows) && Number.isFinite(item.ranAt))
+      .slice(0, MAX_HISTORY_ITEMS);
+  } catch {
+    return [];
+  }
+}
+
+function saveHistory(history) {
+  try {
+    window.localStorage.setItem(HISTORY_STORAGE_KEY, JSON.stringify(history.slice(0, MAX_HISTORY_ITEMS)));
+  } catch {
+    // Private browsing and strict storage policies can disable localStorage.
+  }
+}
+
+function formatHistoryTime(timestamp) {
+  const date = new Date(timestamp);
+  return Number.isNaN(date.getTime()) ? "unknown time" : date.toLocaleTimeString("id-ID", { hour: "2-digit", minute: "2-digit" });
+}
+
 const state = {
   query: "",
   running: false,
-  history: [],
+  configured: false,
+  history: loadHistory(),
 };
 
 const editor = document.querySelector("#sql-editor");
@@ -17,6 +46,14 @@ const rowDetailTable = document.querySelector("#row-detail-table-wrap");
 const toast = document.querySelector("#toast");
 const s3tablesList = document.querySelector("#s3tables-list");
 const refreshS3TablesButton = document.querySelector("#refresh-s3tables");
+const setupGate = document.querySelector("#setup-gate");
+const setupForm = document.querySelector("#setup-form");
+const setupJdbcUrl = document.querySelector("#setup-jdbc-url");
+const setupUsername = document.querySelector("#setup-username");
+const setupPassword = document.querySelector("#setup-password");
+const setupSubmit = document.querySelector("#setup-submit");
+const setupError = document.querySelector("#setup-error");
+const appShell = document.querySelector(".app-shell");
 let rowDetailTrigger = null;
 
 function updateEditorMeta() {
@@ -171,14 +208,14 @@ function renderHistory() {
     list.append(empty);
     return;
   }
-  state.history.slice(0, 5).forEach((item) => {
+  state.history.slice(0, MAX_HISTORY_ITEMS).forEach((item) => {
     const button = document.createElement("button");
     button.type = "button";
     button.className = "history-item";
     const title = document.createElement("strong");
     title.textContent = item.sql.split("\n")[0].slice(0, 34);
     const time = document.createElement("small");
-    time.textContent = `${item.rows} rows · ${item.time}`;
+    time.textContent = `${item.rows} rows · ${formatHistoryTime(item.ranAt)}`;
     button.append(title, time);
     button.addEventListener("click", () => {
       editor.value = item.sql;
@@ -273,7 +310,10 @@ function formatQuery() {
 }
 
 async function runQuery() {
-  if (state.running) return;
+  if (state.running || !state.configured) {
+    if (!state.configured) showSetupGate();
+    return;
+  }
   closeRowDetail(false);
   state.running = true;
   runButton.disabled = true;
@@ -291,8 +331,9 @@ async function runQuery() {
     const payload = await response.json();
     if (!response.ok) throw new Error(payload.error || "Query gagal dijalankan.");
     renderResults(payload);
-    state.history.unshift({ sql: editor.value, rows: payload.rowCount, time: new Date().toLocaleTimeString("id-ID", { hour: "2-digit", minute: "2-digit" }) });
-    state.history = state.history.slice(0, 5);
+    state.history.unshift({ sql: editor.value, rows: payload.rowCount, ranAt: Date.now() });
+    state.history = state.history.slice(0, MAX_HISTORY_ITEMS);
+    saveHistory(state.history);
     renderHistory();
     setToast("Query completed");
   } catch (error) {
@@ -309,15 +350,70 @@ async function checkHealth() {
   try {
     const response = await fetch("/api/health");
     const health = await response.json();
+    state.configured = Boolean(health.configured);
     const badge = document.querySelector("#health-badge");
     badge.textContent = health.configured ? "ready" : "needs setup";
     badge.className = `health-badge ${health.configured ? "" : "is-error"}`;
-    document.querySelector("#connection-detail").textContent = health.configured ? "Read-only session · credentials ready" : "Set server-side credentials to connect";
+    document.querySelector("#connection-detail").textContent = health.configured ? "Read-only session · credentials ready" : "Enter credentials to connect";
     if (health.target) document.querySelector("#connection-host").textContent = health.target.replace(/^jdbc:hive2:\/\//, "").split(";")[0];
+    if (health.configured) hideSetupGate();
+    else showSetupGate();
+    return state.configured;
   } catch {
+    state.configured = false;
     document.querySelector("#health-badge").textContent = "offline";
     document.querySelector("#health-badge").className = "health-badge is-error";
     document.querySelector("#connection-detail").textContent = "Workbench API is not reachable";
+    showSetupGate("Workbench API is not reachable. Start the server, then try again.");
+    return false;
+  }
+}
+
+function showSetupGate(message = "") {
+  setupGate.hidden = false;
+  appShell.inert = true;
+  appShell.setAttribute("aria-hidden", "true");
+  setupError.textContent = message;
+  setupError.hidden = !message;
+  if (document.activeElement === document.body) setupUsername.focus();
+}
+
+function hideSetupGate() {
+  setupGate.hidden = true;
+  appShell.inert = false;
+  appShell.removeAttribute("aria-hidden");
+  setupError.hidden = true;
+}
+
+async function submitSetup(event) {
+  event.preventDefault();
+  setupError.hidden = true;
+  setupSubmit.disabled = true;
+  setupSubmit.querySelector("span:first-child").textContent = "Connecting…";
+  try {
+    const response = await fetch("/api/setup", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        jdbcUrl: setupJdbcUrl.value,
+        username: setupUsername.value,
+        password: setupPassword.value,
+      }),
+    });
+    const payload = await response.json();
+    if (!response.ok) throw new Error(payload.error || "Connection setup failed.");
+    setupPassword.value = "";
+    await checkHealth();
+    if (state.configured) {
+      await loadS3Tables();
+      editor.focus();
+      setToast("Connection ready");
+    }
+  } catch (error) {
+    showSetupGate(error.message);
+  } finally {
+    setupSubmit.disabled = false;
+    setupSubmit.querySelector("span:first-child").textContent = "Connect to Spark";
   }
 }
 
@@ -337,6 +433,7 @@ document.querySelector("#new-query").addEventListener("click", () => {
   editor.focus();
 });
 refreshS3TablesButton.addEventListener("click", loadS3Tables);
+setupForm.addEventListener("submit", submitSetup);
 closeRowDetailButton.addEventListener("click", () => closeRowDetail());
 rowDetail.addEventListener("click", (event) => {
   if (event.target === rowDetail) closeRowDetail();
@@ -359,8 +456,11 @@ document.querySelectorAll("[data-view]").forEach((button) => {
   });
 });
 
-updateEditorMeta();
-renderHistory();
-checkHealth();
-loadS3Tables();
+async function initialize() {
+  updateEditorMeta();
+  renderHistory();
+  if (await checkHealth()) await loadS3Tables();
+}
+
+initialize();
 

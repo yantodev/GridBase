@@ -26,24 +26,28 @@ export SPARK_HOME=/path/ke/spark-3.5.6-bin-hadoop3
 npm start
 ```
 
-Buka <http://127.0.0.1:4173>.
+Buka <http://127.0.0.1:4173>. Pada pemakaian pertama, workbench akan meminta:
 
-Alternatif yang lebih aman daripada menyimpan password di `.bashrc` adalah
-mengisi `.env` lokal dari `.env.example`, lalu membatasi aksesnya:
+- `THRIFT_JDBC_URL`
+- `THRIFT_USERNAME`
+- `THRIFT_PASSWORD`
 
-```bash
-cp .env.example .env
-chmod 600 .env
-```
+Credential tersebut dikirim ke endpoint setup lokal, dipakai oleh Java JDBC,
+dan hanya disimpan di memory proses server. Credential tidak disimpan di
+`.env`, `localStorage`, atau dikembalikan oleh endpoint health. Setelah server
+direstart, setup akan diminta kembali.
 
-Isi `THRIFT_USERNAME` dan `THRIFT_PASSWORD` hanya di `.env`. File tersebut
-sudah masuk `.gitignore` dan tidak boleh di-commit.
+`.env` tetap tersedia untuk pengaturan non-secret seperti port, timeout, dan
+batas jumlah baris. Tiga nilai credential tidak dibaca dari environment atau
+`.env`, sehingga setup form selalu menjadi sumber konfigurasi koneksi.
 
 ## Perilaku aman
 
 - Workbench hanya menerima `SELECT`, `WITH`, `SHOW`, `DESCRIBE`, dan `EXPLAIN`.
 - Hasil dibatasi maksimal 1.000 baris dan query memiliki timeout 30 detik.
-- Query dan hasil hanya disimpan di memori tab browser selama sesi berjalan.
+- Query dan hasil tidak dikirim ke penyimpanan permanen; lima Recent queries
+  terakhir disimpan sebagai JSON di `localStorage` browser agar tetap tersedia
+  setelah reload.
 - Backend bind ke `127.0.0.1` secara default. Jika dipasang di server bersama,
   letakkan di belakang autentikasi/reverse proxy dan gunakan akun database
   read-only.
@@ -54,6 +58,8 @@ sudah masuk `.gitignore` dan tidak boleh di-commit.
 Kontrak API tersedia di [`openapi.yaml`](./openapi.yaml):
 
 - `GET /api/health` — status konfigurasi tanpa mengembalikan secret.
+- `POST /api/setup` — menerima `jdbcUrl`, `username`, dan `password` untuk sesi
+  server saat ini; password tidak pernah dikembalikan.
 - `GET /api/databases` — daftar namespace dari katalog `s3tables` melalui `SHOW NAMESPACES IN s3tables`.
 - `GET /api/namespaces` — alias deprecated untuk klien lama; gunakan `/api/databases`.
 - `POST /api/query` — body `{ "sql": "SELECT ..." }`.

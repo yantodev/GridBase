@@ -95,3 +95,17 @@ test("uses the compact query studio workspace header", () => {
   assert.match(styles, /\.workspace-overview \.connection-meta \{ font-size: 11px; \}/);
 });
 
+test("requires session setup and persists only query history in the browser", () => {
+  const htmlSource = fs.readFileSync(path.join(__dirname, "../public/index.html"), "utf8");
+  const appSource = fs.readFileSync(path.join(__dirname, "../public/app.js"), "utf8");
+  const javaSource = fs.readFileSync(path.join(__dirname, "../java-service/src/com/peentar/thriftquery/ThriftQueryServer.java"), "utf8");
+
+  assert.match(htmlSource, /id="setup-form"/);
+  assert.match(htmlSource, /id="setup-password"/);
+  assert.match(appSource, /fetch\("\/api\/setup"/);
+  assert.match(appSource, /localStorage\.setItem\(HISTORY_STORAGE_KEY/);
+  assert.doesNotMatch(appSource, /localStorage\.(?:getItem|setItem)\([^)]*password/i);
+  assert.match(javaSource, /createContext\("\/api\/setup"/);
+  assert.match(javaSource, /config\.configure\(/);
+});
+

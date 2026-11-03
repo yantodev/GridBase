@@ -15,13 +15,17 @@ const ROOT = __dirname;
 const PUBLIC_DIR = path.join(ROOT, "public");
 const MAX_BODY_BYTES = 64 * 1024;
 const DATABASE_LIST_SQL = "SHOW NAMESPACES IN s3tables";
+const SETUP_MAX_JDBC_URL_LENGTH = 2048;
+const SETUP_MAX_USERNAME_LENGTH = 256;
+const SETUP_MAX_PASSWORD_LENGTH = 2048;
+const RUNTIME_CREDENTIAL_KEYS = new Set(["THRIFT_JDBC_URL", "THRIFT_USERNAME", "THRIFT_PASSWORD"]);
 
 function loadDotEnv(filePath = path.join(ROOT, ".env")) {
   if (!fs.existsSync(filePath)) return;
   const lines = fs.readFileSync(filePath, "utf8").split(/\r?\n/);
   for (const line of lines) {
     const match = line.match(/^\s*([A-Z][A-Z0-9_]*)\s*=\s*(.*)\s*$/);
-    if (!match || process.env[match[1]]) continue;
+    if (!match || process.env[match[1]] || RUNTIME_CREDENTIAL_KEYS.has(match[1])) continue;
     const value = match[2].replace(/^['"]|['"]$/g, "");
     process.env[match[1]] = value;
   }
@@ -64,9 +68,9 @@ const config = {
   port: Number(process.env.PORT || 4173),
   host: process.env.HOST || "127.0.0.1",
   beelineBin: resolveBeelineBin(),
-  jdbcUrl: process.env.THRIFT_JDBC_URL || "",
-  username: process.env.THRIFT_USERNAME || "",
-  password: process.env.THRIFT_PASSWORD || "",
+  jdbcUrl: "",
+  username: "",
+  password: "",
   timeoutMs: Math.min(Math.max(Number(process.env.QUERY_TIMEOUT_MS || 30000), 1000), 120000),
   maxRows: Math.min(Math.max(Number(process.env.MAX_QUERY_ROWS || 1000), 1), 10000),
 };
@@ -106,6 +110,25 @@ function getHealth() {
     readOnly: true,
     target: redactJdbcUrl(config.jdbcUrl),
   };
+}
+
+function configureCredentials(input = {}) {
+  const { jdbcUrl, username, password } = input || {};
+  const normalizedJdbcUrl = requireSetupValue(jdbcUrl, "JDBC URL", SETUP_MAX_JDBC_URL_LENGTH).trim();
+  const normalizedUsername = requireSetupValue(username, "username", SETUP_MAX_USERNAME_LENGTH).trim();
+  const normalizedPassword = requireSetupValue(password, "password", SETUP_MAX_PASSWORD_LENGTH);
+  if (!normalizedJdbcUrl.startsWith("jdbc:hive2://")) {
+    throw new Error("JDBC URL harus menggunakan jdbc:hive2://.");
+  }
+  config.jdbcUrl = normalizedJdbcUrl;
+  config.username = normalizedUsername;
+  config.password = normalizedPassword;
+}
+
+function requireSetupValue(value, label, maxLength) {
+  if (typeof value !== "string" || !value.trim()) throw new Error(`${label} wajib diisi.`);
+  if (value.length > maxLength) throw new Error(`${label} terlalu panjang.`);
+  return value;
 }
 
 function describeBeelineSpawnError(error, binary = config.beelineBin) {
@@ -272,6 +295,17 @@ async function handleQuery(request, response) {
   }
 }
 
+async function handleSetup(request, response) {
+  let body;
+  try {
+    body = await readJsonBody(request);
+    configureCredentials(body);
+    sendJson(response, 200, getHealth());
+  } catch (error) {
+    sendJson(response, error.statusCode || 422, { error: error.message || "Request tidak valid." });
+  }
+}
+
 async function handleDatabaseList(response, responseField, label) {
   try {
     const result = await runBeeline(DATABASE_LIST_SQL);
@@ -334,6 +368,10 @@ function createServer() {
       sendJson(response, 200, getHealth());
       return;
     }
+    if (request.method === "POST" && request.url === "/api/setup") {
+      await handleSetup(request, response);
+      return;
+    }
     if (request.method === "POST" && request.url === "/api/query") {
       await handleQuery(request, response);
       return;
@@ -366,6 +404,7 @@ if (require.main === module && process.argv.includes("--legacy")) {
 
 module.exports = {
   config,
+  configureCredentials,
   createServer,
   DATABASE_LIST_SQL,
   buildBeelineArgs,
