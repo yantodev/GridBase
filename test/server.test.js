@@ -91,5 +91,7 @@ test("uses the compact query studio workspace header", () => {
   assert.doesNotMatch(htmlSource, /Ask the warehouse|better questions\.|A focused desk for exploring your Spark data/);
   assert.match(styles, /\/\* Keep the workspace overview visually secondary/);
   assert.match(styles, /\.workspace-overview h1 \{ font-size: 23px; \}/);
+  assert.match(styles, /\.catalog-chip span \{ font-size: 11px; \}/);
+  assert.match(styles, /\.workspace-overview \.connection-meta \{ font-size: 11px; \}/);
 });
 

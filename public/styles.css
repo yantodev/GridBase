@@ -130,10 +130,10 @@ button:focus-visible, textarea:focus-visible { outline: 3px solid rgba(217, 121,
 .workspace-subtitle { font-size: 12px; margin-top: 4px; }
 .workspace-overview-side { gap: 8px; }
 .catalog-chip { min-width: 110px; gap: 4px; padding: 9px 11px; }
-.catalog-chip span { font-size: 10px; }.catalog-chip strong { font-size: 12px; }
+.catalog-chip span { font-size: 11px; }.catalog-chip strong { font-size: 12px; }
 .workspace-overview .connection-card { min-width: 224px; padding: 9px 12px; }
 .workspace-overview .connection-host { margin: 7px 0 4px; font-size: 11px; }
-.workspace-overview .connection-meta { font-size: 10px; }
+.workspace-overview .connection-meta { font-size: 11px; }
 @media (max-width: 900px) { .workspace-overview { gap: 16px; margin-bottom: 24px; padding-bottom: 16px; } }
 @media (max-width: 640px) { .workspace-overview { margin-bottom: 24px; padding-bottom: 16px; }.workspace-overview h1 { font-size: 22px; }.workspace-signal { width: 30px; height: 30px; }.workspace-overview-side { grid-template-columns: 96px minmax(0, 1fr); }.catalog-chip { padding: 8px 10px; }.workspace-overview .connection-card { padding: 9px 10px; } }
 
