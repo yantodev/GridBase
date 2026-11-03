@@ -61,3 +61,10 @@ test("qualifies sidebar table queries with the s3tables catalog", () => {
   assert.ok(appSource.includes("SHOW TABLES IN \\`s3tables\\`.\\`${escapedNamespace}\\`;"));
 });
 
+test("makes table names load data from the selected s3tables table", () => {
+  const appSource = fs.readFileSync(path.join(__dirname, "../public/app.js"), "utf8");
+
+  assert.ok(appSource.includes("SELECT * FROM \\`s3tables\\`.\\`${escapeSqlIdentifier(namespace)}\\`.\\`${escapeSqlIdentifier(tableName)}\\` LIMIT 1000;"));
+  assert.ok(appSource.includes("runQuery();"));
+});
+

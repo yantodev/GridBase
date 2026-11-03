@@ -35,6 +35,14 @@ function setToast(message) {
   setToast.timeout = window.setTimeout(() => { toast.textContent = ""; }, 2600);
 }
 
+function escapeSqlIdentifier(value) {
+  return String(value ?? "").replace(/`/g, "``");
+}
+
+function buildTableDataQuery(namespace, tableName) {
+  return `SELECT * FROM \`s3tables\`.\`${escapeSqlIdentifier(namespace)}\`.\`${escapeSqlIdentifier(tableName)}\` LIMIT 1000;`;
+}
+
 function renderResults(result) {
   document.querySelector("#row-count").textContent = `${result.rowCount.toLocaleString("id-ID")} rows${result.truncated ? " · capped" : ""}`;
   document.querySelector("#duration").textContent = `${result.durationMs} ms`;
@@ -61,12 +69,32 @@ function renderResults(result) {
   });
   thead.append(headerRow);
   const tbody = document.createElement("tbody");
-  result.rows.forEach((row) => {
+  const tableNameColumn = result.columns.find((column) => column.toLowerCase() === "tablename");
+  const namespaceColumn = result.columns.find((column) => column.toLowerCase() === "namespace");
+  const rows = tableNameColumn
+    ? [...result.rows].sort((left, right) => String(left[tableNameColumn] ?? "").localeCompare(String(right[tableNameColumn] ?? ""), "en", { sensitivity: "base" }))
+    : result.rows;
+  rows.forEach((row) => {
     const tableRow = document.createElement("tr");
     result.columns.forEach((column) => {
       const cell = document.createElement("td");
-      cell.textContent = row[column] ?? "";
-      cell.title = cell.textContent;
+      const value = row[column] ?? "";
+      cell.title = value;
+      if (tableNameColumn && namespaceColumn && column === tableNameColumn && value) {
+        const tableLink = document.createElement("button");
+        tableLink.type = "button";
+        tableLink.className = "table-link";
+        tableLink.textContent = value;
+        tableLink.title = `Load data from ${row[namespaceColumn]}.${value}`;
+        tableLink.addEventListener("click", () => {
+          editor.value = buildTableDataQuery(row[namespaceColumn], value);
+          updateEditorMeta();
+          runQuery();
+        });
+        cell.append(tableLink);
+      } else {
+        cell.textContent = value;
+      }
       tableRow.append(cell);
     });
     tbody.append(tableRow);
