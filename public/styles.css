@@ -1,16 +1,16 @@
 :root {
   --ink: #0b1320;
   --ink-soft: #152238;
-  --linen: #f4f1ea;
-  --paper: #fbfaf6;
-  --line: #d9d6cd;
-  --muted: #7c817f;
+  --linen: #e8eeec;
+  --paper: #f7faf8;
+  --line: #cbd7d2;
+  --muted: #5f6d69;
   --text: #1e2a31;
-  --teal: #397b76;
-  --teal-light: #dce9e4;
-  --orange: #d97947;
-  --orange-light: #f7e2d2;
-  --red: #bb5a4c;
+  --teal: #276b67;
+  --teal-light: #d7e9e1;
+  --orange: #a9522c;
+  --orange-light: #f0ded2;
+  --red: #a94c40;
   --mono: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
   --sans: "Avenir Next", Avenir, Inter, ui-sans-serif, system-ui, sans-serif;
   --display: Georgia, "Times New Roman", serif;
@@ -60,4 +60,23 @@ button:focus-visible, textarea:focus-visible { outline: 3px solid rgba(217, 121,
 .run-button { box-shadow: 0 8px 18px rgba(185, 98, 57, .24); }
 .run-button:active { box-shadow: 0 3px 8px rgba(185, 98, 57, .22); }
 .page-footer { color: #7f8581; }
+
+/* Final contrast, spacing, and readable metadata pass */
+.history-empty { color: #a9bbb7; }
+.version { color: #91a9ad; }
+.read-only-pill { color: #23615c; }
+.section-index { color: #974b28; }
+.shortcut-hint { color: #5e6b67; }
+.connection-kicker { color: #5f6d69; }
+.health-badge.is-pending { color: #805a31; }
+.safety-copy { color: #596762; }
+.result-metrics { color: #596762; }
+.results-table th { color: #56635f; }
+.table-note { color: #5e6c67; }
+.page-footer { color: #566761; }
+.history-item { padding: 11px 12px; }
+.nav-item { padding: 12px; }
+.icon-button { width: 36px; height: 36px; padding: 8px; }
+.avatar { width: 34px; height: 34px; }
+.shortcut-hint kbd, .run-button kbd { padding: 4px 7px; }
 
