@@ -1,10 +1,4 @@
-# Thrift Query Workbench
-
-GUI lokal untuk menjalankan query read-only ke Spark Thrift Server melalui
-Hive JDBC langsung dari Java. Browser tidak pernah menerima JDBC URL, username,
-atau password; semua koneksi berlangsung dari backend Java.
-
-## Tech stack
+<h1 align="center">Thrift Query Workbench</h1>
 
 <p align="center">
   <img alt="Java" src="https://img.shields.io/badge/Java-ED8B00?logo=openjdk&logoColor=white" />
@@ -14,6 +8,10 @@ atau password; semua koneksi berlangsung dari backend Java.
   <img alt="JavaScript" src="https://img.shields.io/badge/JavaScript-F7DF1E?logo=javascript&logoColor=black" />
   <img alt="HTML/CSS" src="https://img.shields.io/badge/HTML%2FCSS-E34F26?logo=html5&logoColor=white" />
 </p>
+
+GUI lokal untuk menjalankan query read-only ke Spark Thrift Server melalui
+Hive JDBC langsung dari Java. Browser tidak pernah menerima JDBC URL, username,
+atau password; semua koneksi berlangsung dari backend Java.
 
 ## Menjalankan
 
