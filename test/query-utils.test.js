@@ -1,6 +1,6 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
-const { parseCsv, redactJdbcUrl, validateQuery } = require("../src/query-utils");
+const { extractNamespaces, parseCsv, redactJdbcUrl, validateQuery } = require("../src/query-utils");
 
 test("accepts a read-only query and removes a trailing semicolon", () => {
   const result = validateQuery("  SELECT id, name FROM users;  ");
@@ -44,5 +44,17 @@ test("redacts credentials embedded in a JDBC URL", () => {
     redactJdbcUrl("jdbc:hive2://host/default;password=super-secret;ssl=true"),
     "jdbc:hive2://host/default;password=••••••;ssl=true",
   );
+});
+
+test("extracts unique namespaces from Spark SHOW DATABASES output", () => {
+  const result = parseCsv("namespace\ndefault\nanalytics\ndefault\n");
+
+  assert.deepEqual(extractNamespaces(result), ["default", "analytics"]);
+});
+
+test("supports Hive-style databaseName output", () => {
+  const result = parseCsv("databaseName\nwarehouse\n");
+
+  assert.deepEqual(extractNamespaces(result), ["warehouse"]);
 });
 
