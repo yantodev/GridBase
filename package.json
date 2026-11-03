@@ -5,9 +5,10 @@
   "description": "A local, read-only query workbench for Spark Thrift Server.",
   "type": "commonjs",
   "scripts": {
-    "start": "node server.js",
-    "test": "node test/query-utils.test.js && node test/server.test.js",
-    "check": "node --check server.js && node --check src/query-utils.js && node --check public/app.js"
+    "start": "bash run-java.sh",
+    "start:node-legacy": "node server.js --legacy",
+    "test": "node test/query-utils.test.js && node test/server.test.js && bash test-java.sh",
+    "check": "node --check server.js && node --check src/query-utils.js && node --check public/app.js && bash run-java.sh --check"
   }
 }
 

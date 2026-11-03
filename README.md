@@ -1,33 +1,28 @@
 # Thrift Query Workbench
 
 GUI lokal untuk menjalankan query read-only ke Spark Thrift Server melalui
-Beeline. Browser tidak pernah menerima JDBC URL, username, atau password;
-semua koneksi berlangsung dari backend Node di mesin yang menjalankan Beeline.
+Hive JDBC langsung dari Java. Browser tidak pernah menerima JDBC URL, username,
+atau password; semua koneksi berlangsung dari backend Java.
 
 ## Menjalankan
 
-Pastikan Beeline bisa dipanggil dari terminal yang sama:
+Pastikan instalasi Spark memiliki Hive JDBC driver:
 
 ```bash
-command -v beeline
-beeline -u "$THRIFT_JDBC_URL" -n "$THRIFT_USERNAME" -p "$THRIFT_PASSWORD"
+ls /home/buana/.local/opt/spark-3.5.6-bin-hadoop3/jars/hive-jdbc-2.3.9.jar
 ```
 
-Jika command `beeline` hanya ada di instalasi Spark lokal, set path executable
-secara eksplisit sebelum menjalankan server:
-
-```bash
-export BEELINE_BIN=/home/buana/.local/opt/spark-3.5.6-bin-hadoop3/bin/beeline
-```
-
-Server juga mencoba menemukan Beeline di `PATH` dan direktori
-`/home/buana/.local/opt/spark*/bin/beeline` secara otomatis.
-
-Jika koneksi CLI sudah berhasil:
+Jika Spark terpasang di lokasi standar:
 
 ```bash
 cd /home/buana/workspace/thrift-query-ui
-source ~/.bashrc
+npm start
+```
+
+Jika lokasi Spark berbeda:
+
+```bash
+export SPARK_HOME=/path/ke/spark-3.5.6-bin-hadoop3
 npm start
 ```
 
@@ -52,7 +47,7 @@ sudah masuk `.gitignore` dan tidak boleh di-commit.
 - Backend bind ke `127.0.0.1` secara default. Jika dipasang di server bersama,
   letakkan di belakang autentikasi/reverse proxy dan gunakan akun database
   read-only.
-- SQL ditulis ke stdin Beeline; input tidak dilewatkan melalui shell.
+- SQL dikirim langsung ke `java.sql.Statement`; tidak ada shell atau proses CLI.
 
 ## Endpoint
 
@@ -68,4 +63,7 @@ Kontrak API tersedia di [`openapi.yaml`](./openapi.yaml):
 npm test
 npm run check
 ```
+
+`npm start` sekarang menjalankan backend Java JDBC. `node server.js` hanya
+tersisa sebagai backend Node legacy dan tidak digunakan oleh jalur utama.
 

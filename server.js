@@ -341,11 +341,14 @@ function createServer() {
   });
 }
 
-if (require.main === module) {
+if (require.main === module && process.argv.includes("--legacy")) {
   createServer().listen(config.port, config.host, () => {
     console.log(`Thrift Query Workbench running at http://${config.host}:${config.port}`);
     console.log(`Beeline executable: ${config.beelineBin}`);
   });
+} else if (require.main === module) {
+  console.error("Node backend legacy tidak dijalankan. Gunakan `npm start` untuk backend Java JDBC.");
+  process.exitCode = 1;
 }
 
 module.exports = {
