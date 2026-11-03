@@ -28,6 +28,18 @@
           </button>
         </nav>
 
+        <section class="namespace-block" aria-labelledby="namespace-heading">
+          <div class="sidebar-label namespace-heading">
+            <span id="namespace-heading">Namespaces</span>
+            <button id="refresh-namespaces" class="sidebar-action" type="button" aria-label="Refresh namespaces" title="Refresh namespaces">
+              <svg viewBox="0 0 20 20" focusable="false"><path d="M16 6.5A6.5 6.5 0 1 0 16.2 11" /><path d="M16 3.8v3.8h-3.8" /></svg>
+            </button>
+          </div>
+          <div id="namespace-list" class="namespace-list" aria-live="polite" aria-label="Available namespaces">
+            <p class="namespace-state">Loading namespaces…</p>
+          </div>
+        </section>
+
         <div class="history-block">
           <div class="sidebar-label history-heading"><span>Recent queries</span><span id="history-count">0</span></div>
           <div id="history-list" class="history-list" aria-live="polite">

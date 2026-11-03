@@ -79,4 +79,21 @@ button:focus-visible, textarea:focus-visible { outline: 3px solid rgba(217, 121,
 .icon-button { width: 36px; height: 36px; padding: 8px; }
 .avatar { width: 34px; height: 34px; }
 .shortcut-hint kbd, .run-button kbd { padding: 4px 7px; }
+.namespace-block { margin-top: 34px; }
+.namespace-heading { display: flex; align-items: center; justify-content: space-between; }
+.sidebar-action { width: 28px; height: 28px; display: grid; place-items: center; padding: 6px; color: #a9bbb7; background: transparent; border: 1px solid transparent; border-radius: 4px; }
+.sidebar-action:hover { color: #fff; border-color: #486372; background: rgba(255,255,255,.07); }
+.sidebar-action:disabled { cursor: wait; opacity: .55; }
+.sidebar-action svg { width: 100%; height: 100%; fill: none; stroke: currentColor; stroke-linecap: round; stroke-linejoin: round; stroke-width: 1.5; }
+.namespace-list { display: grid; gap: 2px; max-height: 180px; overflow-y: auto; padding: 0 4px 0 0; scrollbar-color: #486372 transparent; }
+.namespace-item { width: 100%; display: flex; align-items: center; gap: 8px; padding: 8px 10px; color: #c4d0ce; background: transparent; border: 0; border-radius: 4px; text-align: left; font: 12px var(--mono); }
+.namespace-item:hover { color: #fff; background: #1c3044; }
+.namespace-item:focus-visible { outline-color: var(--orange); }
+.namespace-icon { width: 14px; height: 14px; color: #8fbeb1; flex: 0 0 auto; }
+.namespace-icon svg { width: 100%; height: 100%; fill: none; stroke: currentColor; stroke-linecap: round; stroke-linejoin: round; stroke-width: 1.4; }
+.namespace-state { color: #a9bbb7; font-size: 11px; line-height: 1.5; margin: 5px 10px; }
+.namespace-state.is-error { color: #e0a18e; }
+.namespace-retry { margin: 3px 10px; padding: 7px 9px; color: #d9e6e1; background: transparent; border: 1px solid #486372; border-radius: 4px; font: 11px var(--mono); }
+.namespace-retry:hover { color: #fff; background: #1c3044; }
+@media (max-width: 640px) { .namespace-block { display: none; } }
 

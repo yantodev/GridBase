@@ -5,6 +5,7 @@ const os = require("node:os");
 const { spawn } = require("node:child_process");
 
 const {
+  extractNamespaces,
   parseCsv,
   redactJdbcUrl,
   validateQuery,
@@ -270,6 +271,26 @@ async function handleQuery(request, response) {
   }
 }
 
+async function handleNamespaces(response) {
+  try {
+    const result = await runBeeline("SHOW DATABASES");
+    const parsed = parseCsv(result.stdout);
+    sendJson(response, 200, {
+      namespaces: extractNamespaces(parsed),
+    });
+  } catch (error) {
+    if (error.code === "BEELINE_FAILED" && error.detail) {
+      console.error("Namespace query failed:", error.detail);
+    } else {
+      console.error("Namespace request failed:", error.message);
+    }
+    const statusCode = error.code === "TIMEOUT" ? 504 : ["NOT_CONFIGURED", "BEELINE_NOT_FOUND", "BEELINE_NOT_EXECUTABLE"].includes(error.code) ? 503 : 502;
+    sendJson(response, statusCode, {
+      error: "Namespace tidak dapat dimuat. Periksa koneksi dan kredensial Beeline.",
+    });
+  }
+}
+
 function serveStatic(request, response) {
   let pathname;
   try {
@@ -308,6 +329,10 @@ function createServer() {
       await handleQuery(request, response);
       return;
     }
+    if (request.method === "GET" && request.url?.startsWith("/api/namespaces")) {
+      await handleNamespaces(response);
+      return;
+    }
     if (request.method === "GET") {
       serveStatic(request, response);
       return;
@@ -330,6 +355,7 @@ module.exports = {
   describeBeelineSpawnError,
   getHealth,
   handleQuery,
+  handleNamespaces,
   parseCsv,
   readJsonBody,
   resolveBeelineBin,

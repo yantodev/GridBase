@@ -59,6 +59,7 @@ sudah masuk `.gitignore` dan tidak boleh di-commit.
 Kontrak API tersedia di [`openapi.yaml`](./openapi.yaml):
 
 - `GET /api/health` — status konfigurasi tanpa mengembalikan secret.
+- `GET /api/namespaces` — daftar namespace/database dari `SHOW DATABASES`.
 - `POST /api/query` — body `{ "sql": "SELECT ..." }`.
 
 ## Pengembangan

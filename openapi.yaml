@@ -38,6 +38,23 @@ paths:
           description: Query is not allowed in read-only mode
         '504':
           description: Query timed out
+  /api/namespaces:
+    get:
+      summary: List namespaces available to the configured Spark session
+      description: Runs the fixed read-only SHOW DATABASES statement through Beeline.
+      responses:
+        '200':
+          description: Available namespaces
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/NamespacesResponse'
+        '502':
+          description: Beeline or Thrift Server error
+        '503':
+          description: Beeline is not configured or executable
+        '504':
+          description: Namespace lookup timed out
 components:
   schemas:
     QueryRequest:
@@ -74,4 +91,13 @@ components:
         configured: { type: boolean }
         readOnly: { type: boolean }
         target: { type: string, nullable: true }
+    NamespacesResponse:
+      type: object
+      required: [namespaces]
+      properties:
+        namespaces:
+          type: array
+          items:
+            type: string
+          example: [default, analytics, warehouse]
 

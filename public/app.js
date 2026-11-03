@@ -12,6 +12,8 @@ const resultsLoading = document.querySelector("#results-loading");
 const resultsError = document.querySelector("#results-error");
 const resultsTable = document.querySelector("#results-table-wrap");
 const toast = document.querySelector("#toast");
+const namespaceList = document.querySelector("#namespace-list");
+const refreshNamespacesButton = document.querySelector("#refresh-namespaces");
 
 function updateEditorMeta() {
   state.query = editor.value;
@@ -110,6 +112,77 @@ function renderHistory() {
   });
 }
 
+function createNamespaceIcon() {
+  const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+  svg.setAttribute("viewBox", "0 0 20 20");
+  svg.setAttribute("aria-hidden", "true");
+  const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
+  path.setAttribute("d", "M3.5 6.5h5l1.4 1.7h6.6v6.3a1 1 0 0 1-1 1h-11a1 1 0 0 1-1-1V6.5Z");
+  const line = document.createElementNS("http://www.w3.org/2000/svg", "path");
+  line.setAttribute("d", "M3.5 8.2h13");
+  svg.append(path, line);
+  return svg;
+}
+
+function renderNamespaceState(message, isError = false) {
+  namespaceList.replaceChildren();
+  const stateMessage = document.createElement("p");
+  stateMessage.className = `namespace-state${isError ? " is-error" : ""}`;
+  stateMessage.textContent = message;
+  namespaceList.append(stateMessage);
+  if (isError) {
+    const retry = document.createElement("button");
+    retry.type = "button";
+    retry.className = "namespace-retry";
+    retry.textContent = "Try again";
+    retry.addEventListener("click", loadNamespaces);
+    namespaceList.append(retry);
+  }
+}
+
+function renderNamespaces(namespaces) {
+  namespaceList.replaceChildren();
+  if (!namespaces.length) {
+    renderNamespaceState("No namespaces found.");
+    return;
+  }
+  namespaces.forEach((namespace) => {
+    const item = document.createElement("button");
+    item.type = "button";
+    item.className = "namespace-item";
+    item.title = `Prepare a table query for ${namespace}`;
+    const icon = document.createElement("span");
+    icon.className = "namespace-icon";
+    icon.append(createNamespaceIcon());
+    const label = document.createElement("span");
+    label.textContent = namespace;
+    item.append(icon, label);
+    item.addEventListener("click", () => {
+      const escapedNamespace = namespace.replace(/`/g, "``");
+      editor.value = `SHOW TABLES IN \`${escapedNamespace}\`;`;
+      updateEditorMeta();
+      editor.focus();
+      setToast(`Query prepared for ${namespace}`);
+    });
+    namespaceList.append(item);
+  });
+}
+
+async function loadNamespaces() {
+  refreshNamespacesButton.disabled = true;
+  renderNamespaceState("Loading namespaces…");
+  try {
+    const response = await fetch("/api/namespaces");
+    const payload = await response.json();
+    if (!response.ok) throw new Error(payload.error || "Namespace tidak dapat dimuat.");
+    renderNamespaces(Array.isArray(payload.namespaces) ? payload.namespaces : []);
+  } catch {
+    renderNamespaceState("Unable to load namespaces.", true);
+  } finally {
+    refreshNamespacesButton.disabled = false;
+  }
+}
+
 function formatQuery() {
   const formatted = editor.value
     .replace(/\s+/g, " ")
@@ -183,6 +256,7 @@ document.querySelector("#new-query").addEventListener("click", () => {
   setResultMode("empty");
   editor.focus();
 });
+refreshNamespacesButton.addEventListener("click", loadNamespaces);
 editor.addEventListener("keydown", (event) => {
   if ((event.metaKey || event.ctrlKey) && event.key === "Enter") {
     event.preventDefault();
@@ -201,4 +275,5 @@ document.querySelectorAll("[data-view]").forEach((button) => {
 updateEditorMeta();
 renderHistory();
 checkHealth();
+loadNamespaces();
 
