@@ -12,8 +12,8 @@ const resultsLoading = document.querySelector("#results-loading");
 const resultsError = document.querySelector("#results-error");
 const resultsTable = document.querySelector("#results-table-wrap");
 const toast = document.querySelector("#toast");
-const namespaceList = document.querySelector("#namespace-list");
-const refreshNamespacesButton = document.querySelector("#refresh-namespaces");
+const databaseList = document.querySelector("#database-list");
+const refreshDatabasesButton = document.querySelector("#refresh-databases");
 
 function updateEditorMeta() {
   state.query = editor.value;
@@ -112,7 +112,7 @@ function renderHistory() {
   });
 }
 
-function createNamespaceIcon() {
+function createDatabaseIcon() {
   const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
   svg.setAttribute("viewBox", "0 0 20 20");
   svg.setAttribute("aria-hidden", "true");
@@ -124,62 +124,62 @@ function createNamespaceIcon() {
   return svg;
 }
 
-function renderNamespaceState(message, isError = false) {
-  namespaceList.replaceChildren();
+function renderDatabaseState(message, isError = false) {
+  databaseList.replaceChildren();
   const stateMessage = document.createElement("p");
-  stateMessage.className = `namespace-state${isError ? " is-error" : ""}`;
+  stateMessage.className = `database-state${isError ? " is-error" : ""}`;
   stateMessage.textContent = message;
-  namespaceList.append(stateMessage);
+  databaseList.append(stateMessage);
   if (isError) {
     const retry = document.createElement("button");
     retry.type = "button";
-    retry.className = "namespace-retry";
+    retry.className = "database-retry";
     retry.textContent = "Try again";
-    retry.addEventListener("click", loadNamespaces);
-    namespaceList.append(retry);
+    retry.addEventListener("click", loadDatabases);
+    databaseList.append(retry);
   }
 }
 
-function renderNamespaces(namespaces) {
-  namespaceList.replaceChildren();
-  if (!namespaces.length) {
-    renderNamespaceState("No namespaces found.");
+function renderDatabases(databases) {
+  databaseList.replaceChildren();
+  if (!databases.length) {
+    renderDatabaseState("No databases found.");
     return;
   }
-  namespaces.forEach((namespace) => {
+  databases.forEach((database) => {
     const item = document.createElement("button");
     item.type = "button";
-    item.className = "namespace-item";
-    item.title = `Prepare a table query for ${namespace}`;
+    item.className = "database-item";
+    item.title = `Prepare a table query for ${database}`;
     const icon = document.createElement("span");
-    icon.className = "namespace-icon";
-    icon.append(createNamespaceIcon());
+    icon.className = "database-icon";
+    icon.append(createDatabaseIcon());
     const label = document.createElement("span");
-    label.textContent = namespace;
+    label.textContent = database;
     item.append(icon, label);
     item.addEventListener("click", () => {
-      const escapedNamespace = namespace.replace(/`/g, "``");
-      editor.value = `SHOW TABLES IN \`${escapedNamespace}\`;`;
+      const escapedDatabase = database.replace(/`/g, "``");
+      editor.value = `SHOW TABLES IN \`${escapedDatabase}\`;`;
       updateEditorMeta();
       editor.focus();
-      setToast(`Query prepared for ${namespace}`);
+      setToast(`Query prepared for ${database}`);
     });
-    namespaceList.append(item);
+    databaseList.append(item);
   });
 }
 
-async function loadNamespaces() {
-  refreshNamespacesButton.disabled = true;
-  renderNamespaceState("Loading namespaces…");
+async function loadDatabases() {
+  refreshDatabasesButton.disabled = true;
+  renderDatabaseState("Loading databases…");
   try {
-    const response = await fetch("/api/namespaces");
+    const response = await fetch("/api/databases");
     const payload = await response.json();
-    if (!response.ok) throw new Error(payload.error || "Namespace tidak dapat dimuat.");
-    renderNamespaces(Array.isArray(payload.namespaces) ? payload.namespaces : []);
+    if (!response.ok) throw new Error(payload.error || "Database tidak dapat dimuat.");
+    renderDatabases(Array.isArray(payload.databases) ? payload.databases : []);
   } catch {
-    renderNamespaceState("Unable to load namespaces.", true);
+    renderDatabaseState("Unable to load databases.", true);
   } finally {
-    refreshNamespacesButton.disabled = false;
+    refreshDatabasesButton.disabled = false;
   }
 }
 
@@ -256,7 +256,7 @@ document.querySelector("#new-query").addEventListener("click", () => {
   setResultMode("empty");
   editor.focus();
 });
-refreshNamespacesButton.addEventListener("click", loadNamespaces);
+refreshDatabasesButton.addEventListener("click", loadDatabases);
 editor.addEventListener("keydown", (event) => {
   if ((event.metaKey || event.ctrlKey) && event.key === "Enter") {
     event.preventDefault();
@@ -275,5 +275,5 @@ document.querySelectorAll("[data-view]").forEach((button) => {
 updateEditorMeta();
 renderHistory();
 checkHealth();
-loadNamespaces();
+loadDatabases();
 

@@ -2,7 +2,7 @@ openapi: 3.0.3
 info:
   title: Thrift Query Workbench API
   version: 0.1.0
-  description: Local API for executing read-only SQL through Beeline.
+  description: Local API for executing read-only SQL through Java Hive JDBC.
 servers:
   - url: http://localhost:4173
 paths:
@@ -18,7 +18,7 @@ paths:
                 $ref: '#/components/schemas/HealthResponse'
   /api/query:
     post:
-      summary: Execute a read-only SQL query through Beeline
+      summary: Execute a read-only SQL query through Java Hive JDBC
       requestBody:
         required: true
         content:
@@ -38,23 +38,41 @@ paths:
           description: Query is not allowed in read-only mode
         '504':
           description: Query timed out
-  /api/namespaces:
+  /api/databases:
     get:
-      summary: List namespaces available to the configured Spark session
-      description: Runs the fixed read-only SHOW DATABASES statement through Beeline.
+      summary: List databases available to the configured Spark session
+      description: Runs the fixed read-only SHOW DATABASES statement through Java Hive JDBC.
       responses:
         '200':
-          description: Available namespaces
+          description: Available databases
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DatabasesResponse'
+        '502':
+          description: Hive JDBC or Thrift Server error
+        '503':
+          description: Hive JDBC is not configured or the driver is unavailable
+        '504':
+          description: Database lookup timed out
+  /api/namespaces:
+    get:
+      deprecated: true
+      summary: Deprecated alias for listing databases
+      description: Compatibility endpoint. Use /api/databases for new clients.
+      responses:
+        '200':
+          description: Available databases in the legacy namespaces field
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/NamespacesResponse'
         '502':
-          description: Beeline or Thrift Server error
+          description: Hive JDBC or Thrift Server error
         '503':
-          description: Beeline is not configured or executable
+          description: Hive JDBC is not configured or the driver is unavailable
         '504':
-          description: Namespace lookup timed out
+          description: Database lookup timed out
 components:
   schemas:
     QueryRequest:
@@ -91,7 +109,17 @@ components:
         configured: { type: boolean }
         readOnly: { type: boolean }
         target: { type: string, nullable: true }
+    DatabasesResponse:
+      type: object
+      required: [databases]
+      properties:
+        databases:
+          type: array
+          items:
+            type: string
+          example: [default, analytics, warehouse]
     NamespacesResponse:
+      deprecated: true
       type: object
       required: [namespaces]
       properties:
