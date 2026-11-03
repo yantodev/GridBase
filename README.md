@@ -13,9 +13,9 @@ GUI lokal untuk menjalankan query read-only ke Spark Thrift Server melalui
 Hive JDBC langsung dari Java. Browser tidak pernah menerima JDBC URL, username,
 atau password; semua koneksi berlangsung dari backend Java.
 
-## Menjalankan
+## Menjalankan secara lokal
 
-Pastikan instalasi Spark memiliki Hive JDBC driver:
+Mode lokal membutuhkan instalasi Spark 3.5.6 yang memiliki Hive JDBC driver:
 
 ```bash
 ls /home/buana/.local/opt/spark-3.5.6-bin-hadoop3/jars/hive-jdbc-2.3.9.jar
@@ -35,11 +35,15 @@ export SPARK_HOME=/path/ke/spark-3.5.6-bin-hadoop3
 npm start
 ```
 
-## Docker Compose
+## Menjalankan dengan Docker Compose
 
-Docker Compose menyediakan Java runtime, distribusi Apache Spark 3.5.6 lengkap,
-dan Hive JDBC client secara otomatis. Spark Thrift Server tetap menjadi service
-eksternal yang diakses melalui JDBC.
+Mode Docker tidak membutuhkan instalasi Java atau Spark di komputer host.
+Image menyediakan Java runtime, distribusi Apache Spark 3.5.6 lengkap di
+`/opt/spark`, serta Hive JDBC client secara otomatis.
+
+Compose menjalankan aplikasi workbench. Spark Thrift Server yang menjadi target
+query tetap harus tersedia sebagai service eksternal dan alamatnya dimasukkan
+melalui form setup JDBC pada saat pertama kali membuka aplikasi.
 
 ```bash
 docker compose up --build -d
@@ -50,6 +54,9 @@ Distribusi Spark di dalam container dapat diverifikasi dengan:
 ```bash
 docker compose exec thrift-query spark-submit --version
 ```
+
+Perintah Spark yang tersedia di dalam container antara lain `spark-submit`,
+`spark-sql`, dan `spark-shell`.
 
 Untuk menggunakan port host lain:
 
@@ -77,6 +84,12 @@ direstart, setup akan diminta kembali.
 `.env` tetap tersedia untuk pengaturan non-secret seperti port, timeout, dan
 batas jumlah baris. Tiga nilai credential tidak dibaca dari environment atau
 `.env`, sehingga setup form selalu menjadi sumber konfigurasi koneksi.
+
+Konfigurasi Docker yang tersedia:
+
+- `THRIFT_QUERY_PORT` — port host untuk workbench, default `4173`.
+- `QUERY_TIMEOUT_MS` — batas waktu query, default `30000`.
+- `MAX_QUERY_ROWS` — jumlah baris maksimum, default `1000`.
 
 ## Perilaku aman
 
