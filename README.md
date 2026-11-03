@@ -4,13 +4,16 @@ GUI lokal untuk menjalankan query read-only ke Spark Thrift Server melalui
 Hive JDBC langsung dari Java. Browser tidak pernah menerima JDBC URL, username,
 atau password; semua koneksi berlangsung dari backend Java.
 
-## Label teks rata tengah
+## Tech stack
 
-Gunakan elemen HTML berikut untuk menampilkan label teks di tengah README:
-
-```html
-<p align="center">Label text</p>
-```
+<p align="center">
+  <code>Java</code>&nbsp;&nbsp;
+  <code>Apache Spark</code>&nbsp;&nbsp;
+  <code>Hive JDBC</code>&nbsp;&nbsp;
+  <code>Node.js</code>&nbsp;&nbsp;
+  <code>JavaScript</code>&nbsp;&nbsp;
+  <code>HTML/CSS</code>
+</p>
 
 ## Menjalankan
 
