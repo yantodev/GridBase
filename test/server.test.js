@@ -109,3 +109,14 @@ test("requires session setup and persists only query history in the browser", ()
   assert.match(javaSource, /config\.configure\(/);
 });
 
+test("provides a credential-free Docker Compose runtime", () => {
+  const composeSource = fs.readFileSync(path.join(__dirname, "../compose.yaml"), "utf8");
+  const dockerfileSource = fs.readFileSync(path.join(__dirname, "../Dockerfile"), "utf8");
+
+  assert.match(composeSource, /HOST: 0\.0\.0\.0/);
+  assert.match(composeSource, /THRIFT_QUERY_PORT:-4173\}:4173/);
+  assert.doesNotMatch(composeSource, /THRIFT_(?:JDBC_URL|USERNAME|PASSWORD)/);
+  assert.match(dockerfileSource, /FROM apache\/spark:3\.5\.6 AS spark/);
+  assert.match(dockerfileSource, /HEALTHCHECK/);
+});
+

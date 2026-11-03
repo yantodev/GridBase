@@ -1,0 +1,15 @@
+services:
+  thrift-query:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: thrift-query-workbench:local
+    init: true
+    ports:
+      - "${THRIFT_QUERY_PORT:-4173}:4173"
+    environment:
+      HOST: 0.0.0.0
+      PORT: 4173
+      QUERY_TIMEOUT_MS: "${QUERY_TIMEOUT_MS:-30000}"
+      MAX_QUERY_ROWS: "${MAX_QUERY_ROWS:-1000}"
+    restart: unless-stopped
