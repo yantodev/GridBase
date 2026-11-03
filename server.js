@@ -5,7 +5,7 @@ const os = require("node:os");
 const { spawn } = require("node:child_process");
 
 const {
-  extractNamespaces,
+  extractDatabases,
   parseCsv,
   redactJdbcUrl,
   validateQuery,
@@ -271,24 +271,32 @@ async function handleQuery(request, response) {
   }
 }
 
-async function handleNamespaces(response) {
+async function handleDatabaseList(response, responseField, label) {
   try {
     const result = await runBeeline("SHOW DATABASES");
     const parsed = parseCsv(result.stdout);
     sendJson(response, 200, {
-      namespaces: extractNamespaces(parsed),
+      [responseField]: extractDatabases(parsed),
     });
   } catch (error) {
     if (error.code === "BEELINE_FAILED" && error.detail) {
-      console.error("Namespace query failed:", error.detail);
+      console.error(`${label} query failed:`, error.detail);
     } else {
-      console.error("Namespace request failed:", error.message);
+      console.error(`${label} request failed:`, error.message);
     }
     const statusCode = error.code === "TIMEOUT" ? 504 : ["NOT_CONFIGURED", "BEELINE_NOT_FOUND", "BEELINE_NOT_EXECUTABLE"].includes(error.code) ? 503 : 502;
     sendJson(response, statusCode, {
-      error: "Namespace tidak dapat dimuat. Periksa koneksi dan kredensial Beeline.",
+      error: `${label} tidak dapat dimuat. Periksa koneksi dan kredensial Beeline.`,
     });
   }
+}
+
+async function handleDatabases(response) {
+  return handleDatabaseList(response, "databases", "Database");
+}
+
+async function handleNamespaces(response) {
+  return handleDatabaseList(response, "namespaces", "Namespace");
 }
 
 function serveStatic(request, response) {
@@ -329,6 +337,10 @@ function createServer() {
       await handleQuery(request, response);
       return;
     }
+    if (request.method === "GET" && request.url?.startsWith("/api/databases")) {
+      await handleDatabases(response);
+      return;
+    }
     if (request.method === "GET" && request.url?.startsWith("/api/namespaces")) {
       await handleNamespaces(response);
       return;
@@ -358,6 +370,7 @@ module.exports = {
   describeBeelineSpawnError,
   getHealth,
   handleQuery,
+  handleDatabases,
   handleNamespaces,
   parseCsv,
   readJsonBody,

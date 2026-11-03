@@ -115,7 +115,7 @@ function redactJdbcUrl(jdbcUrl) {
   return jdbcUrl.replace(/(password|token|secret)=[^;]*/gi, "$1=••••••");
 }
 
-function extractNamespaces(result) {
+function extractDatabases(result) {
   const preferredColumn = result.columns.find((column) => /^(namespace|database(name)?|schema)$/i.test(column));
   return result.rows
     .map((row) => preferredColumn ? row[preferredColumn] : Object.values(row)[0])
@@ -124,7 +124,12 @@ function extractNamespaces(result) {
     .filter((value, index, values) => values.indexOf(value) === index);
 }
 
+function extractNamespaces(result) {
+  return extractDatabases(result);
+}
+
 module.exports = {
+  extractDatabases,
   extractNamespaces,
   MAX_SQL_LENGTH,
   parseCsv,

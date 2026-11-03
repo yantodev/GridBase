@@ -51,6 +51,7 @@ public final class ThriftQueryServer {
         server = HttpServer.create(new InetSocketAddress(config.host, config.port), 0);
         server.createContext("/api/health", this::health);
         server.createContext("/api/query", this::query);
+        server.createContext("/api/databases", this::databases);
         server.createContext("/api/namespaces", this::namespaces);
         server.createContext("/", this::staticFiles);
         server.setExecutor(executor);
@@ -107,22 +108,31 @@ public final class ThriftQueryServer {
         }
     }
 
+    private void databases(HttpExchange exchange) throws IOException {
+        databaseList(exchange, "databases", "Database");
+    }
+
+    @Deprecated
     private void namespaces(HttpExchange exchange) throws IOException {
+        databaseList(exchange, "namespaces", "Namespace");
+    }
+
+    private void databaseList(HttpExchange exchange, String responseField, String label) throws IOException {
         if (!"GET".equals(exchange.getRequestMethod())) {
             methodNotAllowed(exchange);
             return;
         }
         try {
-            List<String> namespaces = jdbc.namespaces();
-            sendJson(exchange, 200, "{\"namespaces\":" + JsonUtil.stringArray(namespaces) + "}");
+            List<String> databases = jdbc.databases();
+            sendJson(exchange, 200, "{\"" + responseField + "\":" + JsonUtil.stringArray(databases) + "}");
         } catch (IllegalStateException error) {
             sendJson(exchange, 503, error("Koneksi database belum dikonfigurasi di server."));
         } catch (SQLTimeoutException error) {
             logDatabaseFailure(error);
-            sendJson(exchange, 504, error("Namespace tidak dapat dimuat karena query melewati batas waktu."));
+            sendJson(exchange, 504, error(label + " tidak dapat dimuat karena query melewati batas waktu."));
         } catch (ClassNotFoundException | SQLException error) {
             logDatabaseFailure(error);
-            sendJson(exchange, 502, error("Namespace tidak dapat dimuat. Periksa koneksi dan kredensial Hive JDBC."));
+            sendJson(exchange, 502, error(label + " tidak dapat dimuat. Periksa koneksi dan kredensial Hive JDBC."));
         } finally {
             exchange.close();
         }

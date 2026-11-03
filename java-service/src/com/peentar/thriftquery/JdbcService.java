@@ -56,20 +56,25 @@ public final class JdbcService {
         }
     }
 
-    public List<String> namespaces() throws SQLException, ClassNotFoundException {
+    public List<String> databases() throws SQLException, ClassNotFoundException {
         QueryResult result = query("SHOW DATABASES");
-        int namespaceColumn = findNamespaceColumn(result.columns());
-        List<String> namespaces = new ArrayList<>();
+        int databaseColumn = findDatabaseColumn(result.columns());
+        List<String> databases = new ArrayList<>();
         Set<String> seen = new HashSet<>();
         for (List<String> row : result.rows()) {
-            if (namespaceColumn >= row.size()) continue;
-            String value = row.get(namespaceColumn);
-            if (value != null && !value.isBlank() && seen.add(value)) namespaces.add(value);
+            if (databaseColumn >= row.size()) continue;
+            String value = row.get(databaseColumn);
+            if (value != null && !value.isBlank() && seen.add(value)) databases.add(value);
         }
-        return namespaces;
+        return databases;
     }
 
-    private static int findNamespaceColumn(List<String> columns) {
+    @Deprecated
+    public List<String> namespaces() throws SQLException, ClassNotFoundException {
+        return databases();
+    }
+
+    private static int findDatabaseColumn(List<String> columns) {
         for (int index = 0; index < columns.size(); index++) {
             if (columns.get(index).matches("(?i)namespace|database(name)?|schema")) return index;
         }
