@@ -54,7 +54,7 @@ sudah masuk `.gitignore` dan tidak boleh di-commit.
 Kontrak API tersedia di [`openapi.yaml`](./openapi.yaml):
 
 - `GET /api/health` — status konfigurasi tanpa mengembalikan secret.
-- `GET /api/databases` — daftar database dari `SHOW DATABASES`.
+- `GET /api/databases` — daftar namespace dari katalog `s3tables` melalui `SHOW NAMESPACES IN s3tables`.
 - `GET /api/namespaces` — alias deprecated untuk klien lama; gunakan `/api/databases`.
 - `POST /api/query` — body `{ "sql": "SELECT ..." }`.
 

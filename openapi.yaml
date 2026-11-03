@@ -41,7 +41,7 @@ paths:
   /api/databases:
     get:
       summary: List databases available to the configured Spark session
-      description: Runs the fixed read-only SHOW DATABASES statement through Java Hive JDBC.
+      description: Runs the fixed read-only SHOW NAMESPACES IN s3tables statement through Java Hive JDBC and returns the namespaces as database entries for the sidebar.
       responses:
         '200':
           description: Available databases

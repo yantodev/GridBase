@@ -13,6 +13,7 @@ import java.util.Set;
 
 public final class JdbcService {
     private static final String HIVE_DRIVER = "org.apache.hive.jdbc.HiveDriver";
+    static final String DATABASE_LIST_SQL = "SHOW NAMESPACES IN s3tables";
     private final AppConfig config;
 
     public JdbcService(AppConfig config) {
@@ -57,7 +58,7 @@ public final class JdbcService {
     }
 
     public List<String> databases() throws SQLException, ClassNotFoundException {
-        QueryResult result = query("SHOW DATABASES");
+        QueryResult result = query(DATABASE_LIST_SQL);
         int databaseColumn = findDatabaseColumn(result.columns());
         List<String> databases = new ArrayList<>();
         Set<String> seen = new HashSet<>();

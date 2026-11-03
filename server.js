@@ -14,6 +14,7 @@ const {
 const ROOT = __dirname;
 const PUBLIC_DIR = path.join(ROOT, "public");
 const MAX_BODY_BYTES = 64 * 1024;
+const DATABASE_LIST_SQL = "SHOW NAMESPACES IN s3tables";
 
 function loadDotEnv(filePath = path.join(ROOT, ".env")) {
   if (!fs.existsSync(filePath)) return;
@@ -273,7 +274,7 @@ async function handleQuery(request, response) {
 
 async function handleDatabaseList(response, responseField, label) {
   try {
-    const result = await runBeeline("SHOW DATABASES");
+    const result = await runBeeline(DATABASE_LIST_SQL);
     const parsed = parseCsv(result.stdout);
     sendJson(response, 200, {
       [responseField]: extractDatabases(parsed),
@@ -366,6 +367,7 @@ if (require.main === module && process.argv.includes("--legacy")) {
 module.exports = {
   config,
   createServer,
+  DATABASE_LIST_SQL,
   buildBeelineArgs,
   describeBeelineSpawnError,
   getHealth,

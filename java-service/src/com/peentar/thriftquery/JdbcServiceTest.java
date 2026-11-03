@@ -5,6 +5,10 @@ import java.util.Arrays;
 
 public final class JdbcServiceTest {
     public static void main(String[] args) {
+        if (!"SHOW NAMESPACES IN s3tables".equals(JdbcService.DATABASE_LIST_SQL)) {
+            throw new AssertionError("Unexpected database list query: " + JdbcService.DATABASE_LIST_SQL);
+        }
+
         JdbcService.QueryResult result = new JdbcService.QueryResult(
                 List.of("id", "name"),
                 Arrays.asList(Arrays.asList("1", "Ari"), Arrays.asList("2", null)),

@@ -1,6 +1,6 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
-const { buildBeelineArgs, createServer, describeBeelineSpawnError, getHealth, resolveBeelineBin } = require("../server");
+const { buildBeelineArgs, createServer, DATABASE_LIST_SQL, describeBeelineSpawnError, getHealth, resolveBeelineBin } = require("../server");
 
 test("creates an HTTP server without opening a network socket", () => {
   const server = createServer();
@@ -47,5 +47,9 @@ test("passes a password file path instead of a password argument", () => {
   assert.ok(args.includes("-w"));
   assert.ok(args.includes("/tmp/query-password"));
   assert.equal(args.includes("reader-password"), false);
+});
+
+test("uses the s3tables namespace query for the database list", () => {
+  assert.equal(DATABASE_LIST_SQL, "SHOW NAMESPACES IN s3tables");
 });
 
