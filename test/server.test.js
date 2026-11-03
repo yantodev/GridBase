@@ -85,8 +85,11 @@ test("supports opening a transposed detail view for result rows", () => {
 
 test("uses the compact query studio workspace header", () => {
   const htmlSource = fs.readFileSync(path.join(__dirname, "../public/index.html"), "utf8");
+  const styles = fs.readFileSync(path.join(__dirname, "../public/styles.css"), "utf8");
 
   assert.match(htmlSource, /<h1 id="page-title">Query studio<\/h1>/);
   assert.doesNotMatch(htmlSource, /Ask the warehouse|better questions\.|A focused desk for exploring your Spark data/);
+  assert.match(styles, /\/\* Keep the workspace overview visually secondary/);
+  assert.match(styles, /\.workspace-overview h1 \{ font-size: 23px; \}/);
 });
 

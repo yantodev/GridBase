@@ -120,3 +120,20 @@ button:focus-visible, textarea:focus-visible { outline: 3px solid rgba(217, 121,
 @media (max-width: 900px) { .topbar { padding: 0 28px; }.workspace-overview { align-items: start; flex-direction: column; gap: 22px; }.workspace-overview-side { width: 100%; }.workspace-overview .connection-card { flex: 1; } }
 @media (max-width: 640px) { .topbar { padding: 0 18px; }.content-wrap { width: calc(100% - 36px); padding-top: 32px; }.workspace-overview { margin-bottom: 34px; padding-bottom: 22px; }.workspace-overview h1 { font-size: 27px; }.workspace-overview-side { display: grid; grid-template-columns: 112px minmax(0, 1fr); gap: 8px; }.catalog-chip { min-width: 0; padding: 11px 12px; }.workspace-overview .connection-card { min-width: 0; padding: 11px 12px; }.workspace-overview .connection-host { max-width: 100%; } }
 
+/* Keep the workspace overview visually secondary to the query editor. */
+.workspace-overview { gap: 24px; margin-bottom: 28px; padding-bottom: 16px; }
+.workspace-overview-main { gap: 12px; }
+.workspace-signal { width: 32px; height: 32px; padding: 6px; border-radius: 6px 6px 6px 2px; }
+.workspace-signal span { width: 4px; }
+.workspace-signal span:nth-child(1) { height: 8px; }.workspace-signal span:nth-child(2) { height: 13px; }.workspace-signal span:nth-child(3) { height: 19px; }
+.workspace-overview h1 { font-size: 23px; }
+.workspace-subtitle { font-size: 12px; margin-top: 4px; }
+.workspace-overview-side { gap: 8px; }
+.catalog-chip { min-width: 110px; gap: 4px; padding: 9px 11px; }
+.catalog-chip span { font-size: 10px; }.catalog-chip strong { font-size: 12px; }
+.workspace-overview .connection-card { min-width: 224px; padding: 9px 12px; }
+.workspace-overview .connection-host { margin: 7px 0 4px; font-size: 11px; }
+.workspace-overview .connection-meta { font-size: 10px; }
+@media (max-width: 900px) { .workspace-overview { gap: 16px; margin-bottom: 24px; padding-bottom: 16px; } }
+@media (max-width: 640px) { .workspace-overview { margin-bottom: 24px; padding-bottom: 16px; }.workspace-overview h1 { font-size: 22px; }.workspace-signal { width: 30px; height: 30px; }.workspace-overview-side { grid-template-columns: 96px minmax(0, 1fr); }.catalog-chip { padding: 8px 10px; }.workspace-overview .connection-card { padding: 9px 10px; } }
+
