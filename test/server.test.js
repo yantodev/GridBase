@@ -68,3 +68,9 @@ test("makes table names load data from the selected s3tables table", () => {
   assert.ok(appSource.includes("runQuery();"));
 });
 
+test("keeps inactive result states hidden", () => {
+  const styles = fs.readFileSync(path.join(__dirname, "../public/styles.css"), "utf8");
+
+  assert.match(styles, /\[hidden\]\s*\{\s*display:\s*none\s*!important;/);
+});
+

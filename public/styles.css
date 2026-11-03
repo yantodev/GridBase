@@ -22,6 +22,7 @@ body { margin: 0; color: var(--text); background: var(--linen); font-family: var
 button, textarea { font: inherit; }
 button { cursor: pointer; }
 button:focus-visible, textarea:focus-visible { outline: 3px solid rgba(217, 121, 71, .42); outline-offset: 2px; }
+[hidden] { display: none !important; }
 
 .app-shell { min-height: 100vh; display: grid; grid-template-columns: 248px minmax(0, 1fr); }
 .sidebar { background: var(--ink); color: #eef1ec; padding: 28px 20px 22px; display: flex; flex-direction: column; min-height: 100vh; position: relative; overflow: hidden; }
