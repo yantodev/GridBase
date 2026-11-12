@@ -1,6 +1,6 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
-const { extractDatabases, extractNamespaces, parseCsv, redactJdbcUrl, validateQuery } = require("../src/query-utils");
+const { extractDatabases, extractNamespaces, parseCsv, redactJdbcUrl, validateQuery, queryResultLimit } = require("../src/query-utils");
 
 test("accepts a read-only query and removes a trailing semicolon", () => {
   const result = validateQuery("  SELECT id, name FROM users;  ");
@@ -11,11 +11,32 @@ test("accepts a read-only query and removes a trailing semicolon", () => {
   });
 });
 
-test("rejects mutation queries in read-only mode", () => {
-  const result = validateQuery("DROP TABLE users");
+test("accepts SQL to create, insert, update, delete, and manage tables", () => {
+  for (const sql of [
+    "CREATE TABLE users (id INT)",
+    "INSERT INTO users VALUES (1)",
+    "UPDATE users SET id = 2 WHERE id = 1",
+    "DELETE FROM users WHERE id = 2",
+    "DROP TABLE users",
+    "ALTER TABLE users ADD COLUMN name STRING",
+    "TRUNCATE TABLE users",
+    "MERGE INTO users USING changes ON users.id = changes.id WHEN MATCHED THEN DELETE",
+    "WITH values_to_insert AS (SELECT 1 AS id) INSERT INTO users SELECT id FROM values_to_insert",
+  ]) assert.deepEqual(validateQuery(sql), { ok: true, sql });
+});
 
-  assert.equal(result.ok, false);
-  assert.match(result.error, /hanya mengizinkan/i);
+test("preserves quoted SQL values and removes only actual comments", () => {
+  const sql = "UPDATE users SET note = 'https://example.test/a--b/*value*/;delete' WHERE id = 1";
+  assert.deepEqual(validateQuery(`-- update note\n${sql}; -- trailing note`), { ok: true, sql });
+  assert.equal(validateQuery("SELECT 'can''t;delete', `update` FROM users").ok, true);
+});
+
+test("rejects multiple statements and client commands", () => {
+  assert.equal(validateQuery("SELECT 1; DELETE FROM users").ok, false);
+  assert.equal(validateQuery("SELECT 1;\n!sh touch /tmp/unwanted").ok, false);
+  assert.equal(validateQuery("!quit").ok, false);
+  assert.equal(validateQuery("-- comment only").ok, false);
+  assert.equal(validateQuery("SELECT '\0'").ok, false);
 });
 
 test("rejects empty and oversized queries", () => {
@@ -59,3 +80,32 @@ test("supports Hive-style databaseName output", () => {
   assert.deepEqual(extractNamespaces(result), ["warehouse"]);
 });
 
+
+test("honors outer SQL LIMIT and uses 50 only when absent or NULL", () => {
+  const plan = (sql) => queryResultLimit(sql, 50);
+  assert.deepEqual(plan('SELECT * FROM users LIMIT 20'), { sql:'SELECT * FROM users LIMIT 20', rowLimit:null });
+  assert.equal(plan('SELECT * FROM users LIMIT 75').rowLimit, null);
+  assert.equal(plan('SELECT * FROM `users` LIMIT 75').rowLimit,null);
+  assert.equal(plan('SELECT * FROM users ORDER BY `id` LIMIT 75').rowLimit,null);
+  assert.equal(plan('SELECT * FROM `users` LIMIT NULL').sql,'SELECT * FROM `users` LIMIT 50');
+  assert.equal(plan('SELECT 1 LIMIT 20').rowLimit,null);
+  assert.equal(plan('SELECT * FROM users LIMIT 25+50').rowLimit,null);
+  assert.equal(plan('WITH limit AS (SELECT * FROM users) SELECT * FROM limit').rowLimit,50);
+  assert.equal(plan('SELECT * FROM users WHERE limit > 20').rowLimit,50);
+  assert.equal(plan('SELECT * FROM users WHERE id > limit+1').rowLimit,50);
+  assert.equal(plan('SELECT * FROM users ORDER BY id, limit+1 DESC').rowLimit,50);
+  assert.deepEqual(plan('SELECT * FROM users'), { sql:'SELECT * FROM users', rowLimit:50 });
+  assert.deepEqual(plan('SELECT * FROM users LIMIT NULL'), { sql:'SELECT * FROM users LIMIT 50', rowLimit:50 });
+  assert.equal(plan('SELECT * FROM users LIMIT 0').rowLimit, null);
+  assert.equal(plan("SELECT 'LIMIT 20', `limit` FROM users").rowLimit, 50);
+  assert.equal(plan('SELECT * FROM (SELECT * FROM users LIMIT 20) t').rowLimit, 50);
+  assert.equal(plan('WITH t AS (SELECT * FROM users LIMIT 20) SELECT * FROM t').rowLimit, 50);
+  assert.equal(plan('WITH t AS (SELECT * FROM users LIMIT 20) SELECT * FROM t LIMIT 75 OFFSET 5').rowLimit, null);
+  assert.equal(plan('SELECT * FROM users LIMIT (10 + 65)').rowLimit, null);
+  assert.equal(plan('SELECT * FROM users LIMIT ALL').rowLimit, null);
+  assert.equal(plan('SELECT limit FROM users').rowLimit, 50);
+  assert.equal(plan('SELECT * FROM users -- LIMIT 20').rowLimit, 50);
+  const write='WITH t AS (SELECT 1) INSERT INTO users SELECT * FROM t';
+  assert.equal(plan(write).sql,write);
+  assert.equal(plan('UPDATE users SET note = \'LIMIT NULL\'').sql,'UPDATE users SET note = \'LIMIT NULL\'');
+});

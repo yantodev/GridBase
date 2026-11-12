@@ -1,8 +1,8 @@
 openapi: 3.0.3
 info:
-  title: Thrift Query Workbench API
-  version: 0.1.0
-  description: Local API for executing read-only SQL through Java Hive JDBC.
+  title: GridBase API
+  version: 0.2.0
+  description: Local API for querying and changing data through Java Hive JDBC. Connection credentials are loaded from the server's .env or process environment at startup. Explicit outer SQL LIMIT controls returned result size. Missing LIMIT or LIMIT NULL defaults to 50 returned rows (DEFAULT_QUERY_LIMIT). Browser pagination remains 10 rows. This default does not limit affected rows for write statements.
 servers:
   - url: http://localhost:4173
 paths:
@@ -16,30 +16,10 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HealthResponse'
-  /api/setup:
-    post:
-      summary: Configure the in-memory JDBC session
-      description: Accepts the JDBC URL, username, and password from the local setup screen. Values are held only by the running Java process and are never returned in the response or stored in browser storage.
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/SetupRequest'
-      responses:
-        '200':
-          description: Session configured; response contains the same non-sensitive health metadata as GET /api/health.
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/HealthResponse'
-        '400':
-          description: Invalid JSON request
-        '422':
-          description: Missing or invalid JDBC setup values
   /api/query:
     post:
-      summary: Execute a read-only SQL query through Java Hive JDBC
+      summary: Execute a SQL statement through Java Hive JDBC
+      description: Accepts one SELECT, WITH, SHOW, DESCRIBE, EXPLAIN, CREATE, INSERT, UPDATE, DELETE, MERGE, ALTER, DROP, or TRUNCATE statement. Successful statements without a result set return empty columns and rows, with updateCount when the driver reports an affected-row count.
       requestBody:
         required: true
         content:
@@ -56,7 +36,11 @@ paths:
         '400':
           description: Invalid query
         '422':
-          description: Query is not allowed in read-only mode
+          description: Unsupported SQL or more than one statement
+        '502':
+          description: Hive JDBC rejected the SQL or could not execute it
+        '503':
+          description: Connection credentials or Hive JDBC driver are unavailable
         '504':
           description: Query timed out
   /api/databases:
@@ -76,6 +60,59 @@ paths:
           description: Hive JDBC is not configured or the driver is unavailable
         '504':
           description: Database lookup timed out
+  /api/tables:
+    get:
+      summary: List tables in an s3tables namespace
+      description: Metadata uses a separate 10000-row ceiling, independent of DEFAULT_QUERY_LIMIT.
+      parameters:
+        - $ref: '#/components/parameters/Namespace'
+      responses:
+        '200':
+          description: Available tables
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [tables]
+                properties:
+                  tables:
+                    type: array
+                    items: { type: string }
+        '422': { description: Invalid identifier }
+        '502': { description: Metadata lookup failed }
+        '503': { description: Connection or driver unavailable }
+        '504': { description: Lookup timed out }
+  /api/columns:
+    get:
+      summary: Describe typed columns of an s3tables table
+      parameters:
+        - $ref: '#/components/parameters/Namespace'
+        - in: query
+          name: table
+          required: true
+          schema: { type: string, minLength: 1, maxLength: 256 }
+      responses:
+        '200':
+          description: Unique columns without partition separator rows
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [columns]
+                properties:
+                  columns:
+                    type: array
+                    items:
+                      type: object
+                      required: [name, type, comment]
+                      properties:
+                        name: { type: string }
+                        type: { type: string }
+                        comment: { type: string }
+        '422': { description: Invalid identifier }
+        '502': { description: Metadata lookup failed }
+        '503': { description: Connection or driver unavailable }
+        '504': { description: Lookup timed out }
   /api/namespaces:
     get:
       deprecated: true
@@ -95,25 +132,14 @@ paths:
         '504':
           description: Database lookup timed out
 components:
+  parameters:
+    Namespace:
+      in: query
+      name: namespace
+      required: true
+      description: Nonblank identifier without control characters. Backticks are escaped by the server.
+      schema: { type: string, minLength: 1, maxLength: 256 }
   schemas:
-    SetupRequest:
-      type: object
-      required: [jdbcUrl, username, password]
-      properties:
-        jdbcUrl:
-          type: string
-          maxLength: 2048
-          pattern: '^jdbc:hive2://'
-          example: jdbc:hive2://spark.example:443/default;transportMode=http
-        username:
-          type: string
-          maxLength: 256
-          example: reader
-        password:
-          type: string
-          maxLength: 2048
-          format: password
-          writeOnly: true
     QueryRequest:
       type: object
       required: [sql]
@@ -133,9 +159,16 @@ components:
           type: array
           items:
             type: object
-            additionalProperties: { type: string }
+            additionalProperties: { type: string, nullable: true }
         rowCount:
           type: integer
+          description: Number of rows returned in the result set, not the number of affected rows.
+        updateCount:
+          type: integer
+          format: int64
+          minimum: 0
+          nullable: true
+          description: Affected rows for a statement without a result set. Null for result sets or when the driver does not report a count.
         durationMs:
           type: integer
         truncated:
@@ -146,7 +179,7 @@ components:
       properties:
         status: { type: string, enum: [ok, degraded] }
         configured: { type: boolean }
-        readOnly: { type: boolean }
+        readOnly: { type: boolean, enum: [false] }
         target: { type: string, nullable: true }
     DatabasesResponse:
       type: object

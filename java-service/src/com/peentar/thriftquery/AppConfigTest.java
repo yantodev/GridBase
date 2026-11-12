@@ -2,28 +2,42 @@ package com.peentar.thriftquery;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.Map;
 
 public final class AppConfigTest {
     public static void main(String[] args) throws Exception {
         Path temporaryRoot = Files.createTempDirectory("thrift-query-config-test");
         try {
             Files.writeString(temporaryRoot.resolve(".env"),
-                    "THRIFT_JDBC_URL=jdbc:hive2://legacy.example\n"
-                            + "THRIFT_USERNAME=legacy-reader\n"
-                            + "THRIFT_PASSWORD=legacy-secret\n");
-            AppConfig config = AppConfig.load(temporaryRoot);
-            check(!config.configured(), "credential values from .env must be ignored");
-            config.configure("jdbc:hive2://spark.example:443/default;transportMode=http", "reader", "top-secret");
+                    "# Local connection\n"
+                            + "THRIFT_JDBC_URL=\"jdbc:hive2://spark.example:443/default;transportMode=http;token=hidden-token\"\n"
+                            + "THRIFT_USERNAME='reader'\n"
+                            + "THRIFT_PASSWORD=\" top-secret=#value \"\n");
+            AppConfig config = AppConfig.load(temporaryRoot, Map.of());
 
-            check(config.configured(), "configured credentials should be ready");
-            check("jdbc:hive2://spark.example:443/default;transportMode=http".equals(config.jdbcUrl()), "JDBC URL should be stored in memory");
-            check("reader".equals(config.username()), "username should be stored in memory");
-            check("top-secret".equals(config.password()), "password should be stored in memory");
+            check(config.configured(), "credentials from .env should be ready at startup");
+            check(config.defaultQueryLimit == 50, "default result limit should be 50 rows");
+            check(AppConfig.load(temporaryRoot, Map.of("DEFAULT_QUERY_LIMIT", "25")).defaultQueryLimit == 25, "result limit should remain configurable");
+            check(config.jdbcUrl().startsWith("jdbc:hive2://spark.example:443/default;transportMode=http"), "JDBC URL should load from .env");
+            check("reader".equals(config.username()), "username should load from .env without quotes");
+            check(" top-secret=#value ".equals(config.password()), "quoted password must preserve whitespace and special characters");
             check(!config.redactedTarget().contains("top-secret"), "redacted target must not contain the password");
+            check(!config.redactedTarget().contains("hidden-token"), "redacted target must hide URL tokens");
 
-            expectInvalid(() -> config.configure("https://spark.example", "reader", "top-secret"));
-            expectInvalid(() -> config.configure("jdbc:hive2://spark.example", "", "top-secret"));
-            expectInvalid(() -> config.configure("jdbc:hive2://spark.example", "reader", ""));
+            AppConfig overridden = AppConfig.load(temporaryRoot, Map.of(
+                    "THRIFT_JDBC_URL", "jdbc:hive2://override.example/default",
+                    "THRIFT_USERNAME", "environment-reader", "THRIFT_PASSWORD", "environment-secret"));
+            check("jdbc:hive2://override.example/default".equals(overridden.jdbcUrl()), "environment URL should override .env");
+            check("environment-reader".equals(overridden.username()), "environment username should override .env");
+            check("environment-secret".equals(overridden.password()), "environment password should override .env");
+
+            expectInvalid(() -> AppConfig.load(temporaryRoot, Map.of("THRIFT_JDBC_URL", "https://spark.example")));
+            expectInvalid(() -> AppConfig.load(temporaryRoot, Map.of("THRIFT_PASSWORD", "x".repeat(2049))));
+
+            Files.writeString(temporaryRoot.resolve(".env"), "THRIFT_JDBC_URL=\nTHRIFT_USERNAME=\nTHRIFT_PASSWORD=\n");
+            check(!AppConfig.load(temporaryRoot, Map.of()).configured(), "empty credentials should leave the server unconfigured");
+            Files.delete(temporaryRoot.resolve(".env"));
+            check(!AppConfig.load(temporaryRoot, Map.of()).configured(), "missing .env should leave the server unconfigured");
         } finally {
             Files.deleteIfExists(temporaryRoot.resolve(".env"));
             Files.deleteIfExists(temporaryRoot);

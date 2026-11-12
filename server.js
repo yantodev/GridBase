@@ -9,25 +9,24 @@ const {
   parseCsv,
   redactJdbcUrl,
   validateQuery,
+  queryResultLimit,
 } = require("./src/query-utils");
+
+const { METADATA_LIMIT, metadataSql, extractTables, extractColumns } = require("./src/metadata");
 
 const ROOT = __dirname;
 const PUBLIC_DIR = path.join(ROOT, "public");
 const MAX_BODY_BYTES = 64 * 1024;
 const DATABASE_LIST_SQL = "SHOW NAMESPACES IN s3tables";
-const SETUP_MAX_JDBC_URL_LENGTH = 2048;
-const SETUP_MAX_USERNAME_LENGTH = 256;
-const SETUP_MAX_PASSWORD_LENGTH = 2048;
-const RUNTIME_CREDENTIAL_KEYS = new Set(["THRIFT_JDBC_URL", "THRIFT_USERNAME", "THRIFT_PASSWORD"]);
-
-function loadDotEnv(filePath = path.join(ROOT, ".env")) {
+function loadDotEnv(filePath = path.join(ROOT, ".env"), environment = process.env) {
   if (!fs.existsSync(filePath)) return;
   const lines = fs.readFileSync(filePath, "utf8").split(/\r?\n/);
   for (const line of lines) {
     const match = line.match(/^\s*([A-Z][A-Z0-9_]*)\s*=\s*(.*)\s*$/);
-    if (!match || process.env[match[1]] || RUNTIME_CREDENTIAL_KEYS.has(match[1])) continue;
-    const value = match[2].replace(/^['"]|['"]$/g, "");
-    process.env[match[1]] = value;
+    if (!match || environment[match[1]]?.trim()) continue;
+    const rawValue = match[2].trim();
+    const quoted = (rawValue.startsWith('"') && rawValue.endsWith('"')) || (rawValue.startsWith("'") && rawValue.endsWith("'"));
+    environment[match[1]] = quoted && rawValue.length >= 2 ? rawValue.slice(1, -1) : rawValue;
   }
 }
 
@@ -68,11 +67,9 @@ const config = {
   port: Number(process.env.PORT || 4173),
   host: process.env.HOST || "127.0.0.1",
   beelineBin: resolveBeelineBin(),
-  jdbcUrl: "",
-  username: "",
-  password: "",
+  ...loadConnectionConfig(process.env),
   timeoutMs: Math.min(Math.max(Number(process.env.QUERY_TIMEOUT_MS || 30000), 1000), 120000),
-  maxRows: Math.min(Math.max(Number(process.env.MAX_QUERY_ROWS || 1000), 1), 10000),
+  defaultQueryLimit: Math.min(Math.max(Number.parseInt(process.env.DEFAULT_QUERY_LIMIT, 10) || 50, 1), 10000),
 };
 
 const MIME_TYPES = {
@@ -104,28 +101,33 @@ function sendJson(response, statusCode, payload) {
 }
 
 function getHealth() {
+  const configured = Boolean(config.jdbcUrl && config.username && config.password.trim());
   return {
-    status: config.jdbcUrl && config.username && config.password ? "ok" : "degraded",
-    configured: Boolean(config.jdbcUrl && config.username && config.password),
-    readOnly: true,
+    status: configured ? "ok" : "degraded",
+    configured,
+    readOnly: false,
     target: redactJdbcUrl(config.jdbcUrl),
   };
 }
 
-function configureCredentials(input = {}) {
-  const { jdbcUrl, username, password } = input || {};
-  const normalizedJdbcUrl = requireSetupValue(jdbcUrl, "JDBC URL", SETUP_MAX_JDBC_URL_LENGTH).trim();
-  const normalizedUsername = requireSetupValue(username, "username", SETUP_MAX_USERNAME_LENGTH).trim();
-  const normalizedPassword = requireSetupValue(password, "password", SETUP_MAX_PASSWORD_LENGTH);
-  if (!normalizedJdbcUrl.startsWith("jdbc:hive2://")) {
-    throw new Error("JDBC URL harus menggunakan jdbc:hive2://.");
+function loadConnectionConfig(environment) {
+  const connection = {
+    jdbcUrl: (environment.THRIFT_JDBC_URL || "").trim(),
+    username: (environment.THRIFT_USERNAME || "").trim(),
+    password: environment.THRIFT_PASSWORD || "",
+  };
+  if (connection.jdbcUrl && connection.username && connection.password.trim()) {
+    requireCredentialValue(connection.jdbcUrl, "JDBC URL", 2048);
+    requireCredentialValue(connection.username, "username", 256);
+    requireCredentialValue(connection.password, "password", 2048);
+    if (!connection.jdbcUrl.startsWith("jdbc:hive2://")) {
+      throw new Error("JDBC URL harus menggunakan jdbc:hive2://.");
+    }
   }
-  config.jdbcUrl = normalizedJdbcUrl;
-  config.username = normalizedUsername;
-  config.password = normalizedPassword;
+  return connection;
 }
 
-function requireSetupValue(value, label, maxLength) {
+function requireCredentialValue(value, label, maxLength) {
   if (typeof value !== "string" || !value.trim()) throw new Error(`${label} wajib diisi.`);
   if (value.length > maxLength) throw new Error(`${label} terlalu panjang.`);
   return value;
@@ -180,7 +182,7 @@ function readJsonBody(request) {
 }
 
 function runBeeline(sql) {
-  if (!config.jdbcUrl || !config.username || !config.password) {
+  if (!config.jdbcUrl || !config.username || !config.password.trim()) {
     return Promise.reject(Object.assign(new Error("Database connection is not configured"), { code: "NOT_CONFIGURED" }));
   }
 
@@ -249,7 +251,7 @@ function runBeeline(sql) {
   });
 }
 
-async function handleQuery(request, response) {
+async function handleQuery(request, response, execute = runBeeline) {
   let body;
   try {
     body = await readJsonBody(request);
@@ -266,15 +268,17 @@ async function handleQuery(request, response) {
 
   const startedAt = Date.now();
   try {
-    const result = await runBeeline(validation.sql);
+    const plan = queryResultLimit(validation.sql, config.defaultQueryLimit);
+    const result = await execute(plan.sql);
     const parsed = parseCsv(result.stdout);
-    const rows = parsed.rows.slice(0, config.maxRows);
+    const rows = plan.rowLimit === null ? parsed.rows : parsed.rows.slice(0, plan.rowLimit);
     sendJson(response, 200, {
       columns: parsed.columns,
       rows,
       rowCount: rows.length,
       durationMs: Date.now() - startedAt,
       truncated: parsed.rows.length > rows.length,
+      updateCount: null,
     });
   } catch (error) {
     const statusCode = error.code === "TIMEOUT" ? 504 : ["NOT_CONFIGURED", "BEELINE_NOT_FOUND", "BEELINE_NOT_EXECUTABLE"].includes(error.code) ? 503 : 502;
@@ -295,23 +299,12 @@ async function handleQuery(request, response) {
   }
 }
 
-async function handleSetup(request, response) {
-  let body;
-  try {
-    body = await readJsonBody(request);
-    configureCredentials(body);
-    sendJson(response, 200, getHealth());
-  } catch (error) {
-    sendJson(response, error.statusCode || 422, { error: error.message || "Request tidak valid." });
-  }
-}
-
 async function handleDatabaseList(response, responseField, label) {
   try {
     const result = await runBeeline(DATABASE_LIST_SQL);
     const parsed = parseCsv(result.stdout);
     sendJson(response, 200, {
-      [responseField]: extractDatabases(parsed),
+      [responseField]: extractDatabases(parsed).slice(0, METADATA_LIMIT),
     });
   } catch (error) {
     if (error.code === "BEELINE_FAILED" && error.detail) {
@@ -332,6 +325,25 @@ async function handleDatabases(response) {
 
 async function handleNamespaces(response) {
   return handleDatabaseList(response, "namespaces", "Namespace");
+}
+
+async function handleMetadata(response, url, execute = runBeeline) {
+  let sql;
+  const columns = url.pathname === "/api/columns";
+  try {
+    sql = metadataSql(url.searchParams.get("namespace"), columns ? url.searchParams.get("table") : undefined);
+  } catch (error) {
+    sendJson(response, 422, { error: error.message });
+    return;
+  }
+  try {
+    const result = await execute(sql);
+    const parsed = parseCsv(result.stdout);
+    sendJson(response, 200, columns ? { columns: extractColumns(parsed) } : { tables: extractTables(parsed) });
+  } catch (error) {
+    const status = error.code === "TIMEOUT" ? 504 : ["NOT_CONFIGURED", "BEELINE_NOT_FOUND", "BEELINE_NOT_EXECUTABLE"].includes(error.code) ? 503 : 502;
+    sendJson(response, status, { error: "Metadata tidak dapat dimuat. Periksa koneksi lalu refresh." });
+  }
 }
 
 function serveStatic(request, response) {
@@ -364,12 +376,13 @@ function serveStatic(request, response) {
 
 function createServer() {
   return http.createServer(async (request, response) => {
-    if (request.method === "GET" && request.url?.startsWith("/api/health")) {
-      sendJson(response, 200, getHealth());
+    const url = new URL(request.url, "http://localhost");
+    if (request.method === "GET" && ["/api/tables", "/api/columns"].includes(url.pathname)) {
+      await handleMetadata(response, url);
       return;
     }
-    if (request.method === "POST" && request.url === "/api/setup") {
-      await handleSetup(request, response);
+    if (request.method === "GET" && request.url?.startsWith("/api/health")) {
+      sendJson(response, 200, getHealth());
       return;
     }
     if (request.method === "POST" && request.url === "/api/query") {
@@ -394,7 +407,7 @@ function createServer() {
 
 if (require.main === module && process.argv.includes("--legacy")) {
   createServer().listen(config.port, config.host, () => {
-    console.log(`Thrift Query Workbench running at http://${config.host}:${config.port}`);
+    console.log(`GridBase running at http://${config.host}:${config.port}`);
     console.log(`Beeline executable: ${config.beelineBin}`);
   });
 } else if (require.main === module) {
@@ -404,7 +417,6 @@ if (require.main === module && process.argv.includes("--legacy")) {
 
 module.exports = {
   config,
-  configureCredentials,
   createServer,
   DATABASE_LIST_SQL,
   buildBeelineArgs,
@@ -413,6 +425,9 @@ module.exports = {
   handleQuery,
   handleDatabases,
   handleNamespaces,
+  handleMetadata,
+  loadConnectionConfig,
+  loadDotEnv,
   parseCsv,
   readJsonBody,
   resolveBeelineBin,

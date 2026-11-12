@@ -1,0 +1,468 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-11-12T16:25:40.968711Z",
+  "title": "Design System: GridBase",
+  "extensions": {
+    "colorMeta": {
+      "editor": {
+        "role": "neutral",
+        "displayName": "Editor",
+        "tonalRamp": [
+          "oklch(15% 0.0015 271.17)",
+          "oklch(26% 0.0032 271.17)",
+          "oklch(38% 0.0047 271.17)",
+          "oklch(49% 0.0059 271.17)",
+          "oklch(61% 0.0059 271.17)",
+          "oklch(72% 0.0047 271.17)",
+          "oklch(84% 0.0029 271.17)",
+          "oklch(95% 0.0009 271.17)"
+        ]
+      },
+      "chrome": {
+        "role": "neutral",
+        "displayName": "Chrome",
+        "tonalRamp": [
+          "oklch(15% 0.0015 258.36)",
+          "oklch(26% 0.0034 258.36)",
+          "oklch(38% 0.0049 258.36)",
+          "oklch(49% 0.0061 258.36)",
+          "oklch(61% 0.0061 258.36)",
+          "oklch(72% 0.0049 258.36)",
+          "oklch(84% 0.0031 258.36)",
+          "oklch(95% 0.0009 258.36)"
+        ]
+      },
+      "tree": {
+        "role": "neutral",
+        "displayName": "Tree",
+        "tonalRamp": [
+          "oklch(15% 0.0019 274.68)",
+          "oklch(26% 0.0041 274.68)",
+          "oklch(38% 0.0060 274.68)",
+          "oklch(49% 0.0075 274.68)",
+          "oklch(61% 0.0075 274.68)",
+          "oklch(72% 0.0060 274.68)",
+          "oklch(84% 0.0038 274.68)",
+          "oklch(95% 0.0011 274.68)"
+        ]
+      },
+      "border": {
+        "role": "neutral",
+        "displayName": "Border",
+        "tonalRamp": [
+          "oklch(15% 0.0023 268.40)",
+          "oklch(26% 0.0050 268.40)",
+          "oklch(38% 0.0073 268.40)",
+          "oklch(49% 0.0091 268.40)",
+          "oklch(61% 0.0091 268.40)",
+          "oklch(72% 0.0073 268.40)",
+          "oklch(84% 0.0045 268.40)",
+          "oklch(95% 0.0014 268.40)"
+        ]
+      },
+      "text": {
+        "role": "neutral",
+        "displayName": "Text",
+        "tonalRamp": [
+          "oklch(15% 0.0015 264.53)",
+          "oklch(26% 0.0032 264.53)",
+          "oklch(38% 0.0047 264.53)",
+          "oklch(49% 0.0058 264.53)",
+          "oklch(61% 0.0058 264.53)",
+          "oklch(72% 0.0047 264.53)",
+          "oklch(84% 0.0029 264.53)",
+          "oklch(95% 0.0009 264.53)"
+        ]
+      },
+      "muted": {
+        "role": "neutral",
+        "displayName": "Muted",
+        "tonalRamp": [
+          "oklch(15% 0.0042 266.24)",
+          "oklch(26% 0.0092 266.24)",
+          "oklch(38% 0.0134 266.24)",
+          "oklch(49% 0.0167 266.24)",
+          "oklch(61% 0.0167 266.24)",
+          "oklch(72% 0.0134 266.24)",
+          "oklch(84% 0.0084 266.24)",
+          "oklch(95% 0.0025 266.24)"
+        ]
+      },
+      "blue": {
+        "role": "primary",
+        "displayName": "Blue",
+        "tonalRamp": [
+          "oklch(15% 0.0279 259.44)",
+          "oklch(26% 0.0615 259.44)",
+          "oklch(38% 0.0894 259.44)",
+          "oklch(49% 0.1118 259.44)",
+          "oklch(61% 0.1118 259.44)",
+          "oklch(72% 0.0894 259.44)",
+          "oklch(84% 0.0559 259.44)",
+          "oklch(95% 0.0168 259.44)"
+        ]
+      },
+      "selection": {
+        "role": "primary",
+        "displayName": "Selection",
+        "tonalRamp": [
+          "oklch(15% 0.0161 259.71)",
+          "oklch(26% 0.0354 259.71)",
+          "oklch(38% 0.0515 259.71)",
+          "oklch(49% 0.0644 259.71)",
+          "oklch(61% 0.0644 259.71)",
+          "oklch(72% 0.0515 259.71)",
+          "oklch(84% 0.0322 259.71)",
+          "oklch(95% 0.0097 259.71)"
+        ]
+      },
+      "green": {
+        "role": "secondary",
+        "displayName": "Green",
+        "tonalRamp": [
+          "oklch(15% 0.0262 145.62)",
+          "oklch(26% 0.0577 145.62)",
+          "oklch(38% 0.0839 145.62)",
+          "oklch(49% 0.1049 145.62)",
+          "oklch(61% 0.1049 145.62)",
+          "oklch(72% 0.0839 145.62)",
+          "oklch(84% 0.0524 145.62)",
+          "oklch(95% 0.0157 145.62)"
+        ]
+      },
+      "error": {
+        "role": "secondary",
+        "displayName": "Error",
+        "tonalRamp": [
+          "oklch(15% 0.0252 22.59)",
+          "oklch(26% 0.0555 22.59)",
+          "oklch(38% 0.0807 22.59)",
+          "oklch(49% 0.1009 22.59)",
+          "oklch(61% 0.1009 22.59)",
+          "oklch(72% 0.0807 22.59)",
+          "oklch(84% 0.0504 22.59)",
+          "oklch(95% 0.0151 22.59)"
+        ]
+      },
+      "toolbar": {
+        "role": "neutral",
+        "displayName": "Toolbar",
+        "tonalRamp": [
+          "oklch(15% 0.0019 274.67)",
+          "oklch(26% 0.0042 274.67)",
+          "oklch(38% 0.0060 274.67)",
+          "oklch(49% 0.0076 274.67)",
+          "oklch(61% 0.0076 274.67)",
+          "oklch(72% 0.0060 274.67)",
+          "oklch(84% 0.0038 274.67)",
+          "oklch(95% 0.0011 274.67)"
+        ]
+      },
+      "hover": {
+        "role": "neutral",
+        "displayName": "Hover",
+        "tonalRamp": [
+          "oklch(15% 0.0032 267.17)",
+          "oklch(26% 0.0070 267.17)",
+          "oklch(38% 0.0102 267.17)",
+          "oklch(49% 0.0128 267.17)",
+          "oklch(61% 0.0128 267.17)",
+          "oklch(72% 0.0102 267.17)",
+          "oklch(84% 0.0064 267.17)",
+          "oklch(95% 0.0019 267.17)"
+        ]
+      },
+      "editor-rule": {
+        "role": "neutral",
+        "displayName": "Editor Rule",
+        "tonalRamp": [
+          "oklch(15% 0.0022 276.85)",
+          "oklch(26% 0.0049 276.85)",
+          "oklch(38% 0.0072 276.85)",
+          "oklch(49% 0.0090 276.85)",
+          "oklch(61% 0.0090 276.85)",
+          "oklch(72% 0.0072 276.85)",
+          "oklch(84% 0.0045 276.85)",
+          "oklch(95% 0.0013 276.85)"
+        ]
+      },
+      "action": {
+        "role": "secondary",
+        "displayName": "Action",
+        "tonalRamp": [
+          "oklch(15% 0.0112 149.11)",
+          "oklch(26% 0.0246 149.11)",
+          "oklch(38% 0.0358 149.11)",
+          "oklch(49% 0.0448 149.11)",
+          "oklch(61% 0.0448 149.11)",
+          "oklch(72% 0.0358 149.11)",
+          "oklch(84% 0.0224 149.11)",
+          "oklch(95% 0.0067 149.11)"
+        ]
+      },
+      "action-text": {
+        "role": "secondary",
+        "displayName": "Action Text",
+        "tonalRamp": [
+          "oklch(15% 0.0144 146.63)",
+          "oklch(26% 0.0317 146.63)",
+          "oklch(38% 0.0461 146.63)",
+          "oklch(49% 0.0576 146.63)",
+          "oklch(61% 0.0576 146.63)",
+          "oklch(72% 0.0461 146.63)",
+          "oklch(84% 0.0288 146.63)",
+          "oklch(95% 0.0086 146.63)"
+        ]
+      },
+      "action-border": {
+        "role": "secondary",
+        "displayName": "Action Border",
+        "tonalRamp": [
+          "oklch(15% 0.0189 147.33)",
+          "oklch(26% 0.0416 147.33)",
+          "oklch(38% 0.0605 147.33)",
+          "oklch(49% 0.0756 147.33)",
+          "oklch(61% 0.0756 147.33)",
+          "oklch(72% 0.0605 147.33)",
+          "oklch(84% 0.0378 147.33)",
+          "oklch(95% 0.0113 147.33)"
+        ]
+      },
+      "action-hover": {
+        "role": "secondary",
+        "displayName": "Action Hover",
+        "tonalRamp": [
+          "oklch(15% 0.0150 148.32)",
+          "oklch(26% 0.0329 148.32)",
+          "oklch(38% 0.0479 148.32)",
+          "oklch(49% 0.0599 148.32)",
+          "oklch(61% 0.0599 148.32)",
+          "oklch(72% 0.0479 148.32)",
+          "oklch(84% 0.0299 148.32)",
+          "oklch(95% 0.0090 148.32)"
+        ]
+      },
+      "sql-keyword": {
+        "role": "secondary",
+        "displayName": "Sql Keyword",
+        "tonalRamp": [
+          "oklch(15% 0.0227 64.48)",
+          "oklch(26% 0.0499 64.48)",
+          "oklch(38% 0.0726 64.48)",
+          "oklch(49% 0.0907 64.48)",
+          "oklch(61% 0.0907 64.48)",
+          "oklch(72% 0.0726 64.48)",
+          "oklch(84% 0.0454 64.48)",
+          "oklch(95% 0.0136 64.48)"
+        ]
+      },
+      "sql-string": {
+        "role": "secondary",
+        "displayName": "Sql String",
+        "tonalRamp": [
+          "oklch(15% 0.0222 134.95)",
+          "oklch(26% 0.0488 134.95)",
+          "oklch(38% 0.0710 134.95)",
+          "oklch(49% 0.0888 134.95)",
+          "oklch(61% 0.0888 134.95)",
+          "oklch(72% 0.0710 134.95)",
+          "oklch(84% 0.0444 134.95)",
+          "oklch(95% 0.0133 134.95)"
+        ]
+      },
+      "sql-number": {
+        "role": "secondary",
+        "displayName": "Sql Number",
+        "tonalRamp": [
+          "oklch(15% 0.0202 259.60)",
+          "oklch(26% 0.0444 259.60)",
+          "oklch(38% 0.0646 259.60)",
+          "oklch(49% 0.0807 259.60)",
+          "oklch(61% 0.0807 259.60)",
+          "oklch(72% 0.0646 259.60)",
+          "oklch(84% 0.0404 259.60)",
+          "oklch(95% 0.0121 259.60)"
+        ]
+      },
+      "sql-comment": {
+        "role": "secondary",
+        "displayName": "Sql Comment",
+        "tonalRamp": [
+          "oklch(15% 0.0049 261.32)",
+          "oklch(26% 0.0107 261.32)",
+          "oklch(38% 0.0155 261.32)",
+          "oklch(49% 0.0194 261.32)",
+          "oklch(61% 0.0194 261.32)",
+          "oklch(72% 0.0155 261.32)",
+          "oklch(84% 0.0097 261.32)",
+          "oklch(95% 0.0029 261.32)"
+        ]
+      },
+      "sql-identifier": {
+        "role": "secondary",
+        "displayName": "Sql Identifier",
+        "tonalRamp": [
+          "oklch(15% 0.0192 298.24)",
+          "oklch(26% 0.0423 298.24)",
+          "oklch(38% 0.0616 298.24)",
+          "oklch(49% 0.0770 298.24)",
+          "oklch(61% 0.0770 298.24)",
+          "oklch(72% 0.0616 298.24)",
+          "oklch(84% 0.0385 298.24)",
+          "oklch(95% 0.0115 298.24)"
+        ]
+      }
+    },
+    "typographyMeta": {
+      "title": {
+        "displayName": "Dialog title",
+        "purpose": "Compact native dialog headings."
+      },
+      "pane-title": {
+        "displayName": "Pane title",
+        "purpose": "Application title and explorer heading."
+      },
+      "body": {
+        "displayName": "UI body",
+        "purpose": "Controls, console tabs, and explorer objects."
+      },
+      "small": {
+        "displayName": "Small UI",
+        "purpose": "Search inputs, toolbar context, and explanatory copy."
+      },
+      "label": {
+        "displayName": "Secondary label",
+        "purpose": "Status bars, counts, and secondary metadata."
+      },
+      "code": {
+        "displayName": "SQL and gutter",
+        "purpose": "Matching editor and line-number metrics; installed fallback is not visually verified."
+      },
+      "data": {
+        "displayName": "Results data",
+        "purpose": "Returned table values with tabular numerals."
+      }
+    },
+    "shadows": [
+      {
+        "name": "completion",
+        "value": "0 8px 25px #0006",
+        "purpose": "SQL suggestion panel."
+      },
+      {
+        "name": "dialog",
+        "value": "0 16px 48px #0008",
+        "purpose": "Rename and row-detail native dialogs."
+      },
+      {
+        "name": "mobile-explorer",
+        "value": "8px 0 24px #0006",
+        "purpose": "Explorer overlay at widths up to 700px."
+      }
+    ],
+    "motion": [
+      {
+        "name": "query-pulse",
+        "value": "query-pulse 1.4s ease-in-out infinite",
+        "purpose": "Loading result SVG only; halfway opacity .3; removed under prefers-reduced-motion: reduce."
+      }
+    ],
+    "breakpoints": [
+      {
+        "name": "compact-header",
+        "value": "960px"
+      },
+      {
+        "name": "overlay-explorer",
+        "value": "700px"
+      },
+      {
+        "name": "wrapped-editor-context",
+        "value": "420px"
+      }
+    ]
+  },
+  "components": [
+    {
+      "name": "Execute / Save",
+      "kind": "button",
+      "refersTo": "button-primary",
+      "description": "Compact green primary action with the source hover, focus, and disabled states.",
+      "html": "<button class=\"ds-primary\" type=\"button\"><svg viewBox=\"0 0 20 20\" aria-hidden=\"true\"><path d=\"m6 4 10 6-10 6Z\"/></svg><span>Execute</span></button>",
+      "css": ".ds-primary{display:inline-flex;align-items:center;justify-content:center;gap:5px;min-height:28px;padding:4px 9px;border:1px solid #527d57;border-radius:4px;background:#344c38;color:#c9eccb;font:13px/1.5 -apple-system, BlinkMacSystemFont, \"Segoe UI\", sans-serif;cursor:pointer;}.ds-primary svg{width:15px;height:15px;fill:currentColor;stroke:none;}.ds-primary:hover:not(:disabled){background:#3b5c40;}.ds-primary:focus-visible{outline:2px solid var(--blue, #88b4fa);outline-offset:-2px;}.ds-primary:disabled{opacity:.45;cursor:default;}"
+    },
+    {
+      "name": "Tool Button",
+      "kind": "button",
+      "refersTo": "button-tool",
+      "description": "Transparent named toolbar action with the shared outline SVG treatment.",
+      "html": "<button class=\"ds-tool\" type=\"button\"><svg viewBox=\"0 0 20 20\" aria-hidden=\"true\"><path d=\"M3 4h14M7 8h10M7 12h7M3 16h14M2 8l3 2-3 2\"/></svg><span>Format</span></button>",
+      "css": ".ds-tool{display:inline-flex;align-items:center;gap:6px;min-height:28px;padding:4px 7px;border:1px solid transparent;border-radius:4px;background:transparent;color:var(--text, #dfe1e5);font:13px/1.5 -apple-system, BlinkMacSystemFont, \"Segoe UI\", sans-serif;cursor:pointer;}.ds-tool svg{fill:none;stroke:currentColor;stroke-width:1.4;stroke-linecap:round;stroke-linejoin:round;flex-shrink:0;width:16px;height:16px;}.ds-tool:hover:not(:disabled){background:#393c43;}.ds-tool:focus-visible{outline:2px solid var(--blue, #88b4fa);outline-offset:-2px;}.ds-tool:disabled{opacity:.45;cursor:default;}"
+    },
+    {
+      "name": "Explorer Search",
+      "kind": "input",
+      "refersTo": "input-search",
+      "description": "Labeled explorer search using the real field shape and keyboard focus treatment.",
+      "html": "<label class=\"ds-search\"><svg viewBox=\"0 0 20 20\" aria-hidden=\"true\"><circle cx=\"8.5\" cy=\"8.5\" r=\"5\"/><path d=\"m12 12 5 5\"/></svg><input class=\"ds-search-input\" type=\"search\" placeholder=\"Filter loaded objects\" aria-label=\"Filter loaded database objects\"/></label>",
+      "css": ".ds-search{display:flex;align-items:center;gap:5px;min-width:0;color:var(--muted, #a8adb8);}.ds-search svg{fill:none;stroke:currentColor;stroke-width:1.4;stroke-linecap:round;stroke-linejoin:round;flex-shrink:0;width:15px;height:15px;}.ds-search-input{width:100%;min-width:0;height:28px;padding:5px 8px;border:1px solid var(--border, #393b40);border-radius:4px;background:var(--editor, #1e1f22);color:var(--text, #dfe1e5);font:12px/1.5 -apple-system, BlinkMacSystemFont, \"Segoe UI\", sans-serif;}.ds-search-input::placeholder{color:var(--muted, #a8adb8);opacity:1;}.ds-search-input:focus-visible{outline:2px solid var(--blue, #88b4fa);outline-offset:-2px;}"
+    },
+    {
+      "name": "Tool Rail",
+      "kind": "nav",
+      "refersTo": "tool-navigation",
+      "description": "Fixed-width rail with an active database tool and an inactive history tool. Production controller toggles the selected tool.",
+      "html": "<nav class=\"ds-rail\" aria-label=\"Tool windows\"><button class=\"ds-rail-button ds-rail-active\" type=\"button\" aria-label=\"Database explorer\" aria-expanded=\"true\"><svg viewBox=\"0 0 20 20\" aria-hidden=\"true\"><ellipse cx=\"10\" cy=\"4.5\" rx=\"6\" ry=\"2.5\"/><path d=\"M4 4.5v11c0 3.3 12 3.3 12 0v-11M4 10c0 3.3 12 3.3 12 0\"/></svg></button><button class=\"ds-rail-button\" type=\"button\" aria-label=\"Query history\" aria-expanded=\"false\"><svg viewBox=\"0 0 20 20\" aria-hidden=\"true\"><path d=\"M3 8a7 7 0 1 1 0 5M3 3v5h5M10 6v4l3 2\"/></svg></button></nav>",
+      "css": ".ds-rail{display:flex;flex-direction:column;align-items:center;gap:6px;width:42px;padding-top:8px;border-right:1px solid var(--border, #393b40);background:var(--chrome, #2b2d30);}.ds-rail-button{display:grid;place-items:center;width:32px;height:34px;border:1px solid transparent;border-radius:4px;background:transparent;color:var(--muted, #a8adb8);cursor:pointer;}.ds-rail-button svg{fill:none;stroke:currentColor;stroke-width:1.4;stroke-linecap:round;stroke-linejoin:round;flex-shrink:0;width:18px;height:18px;}.ds-rail-active{background:var(--selection, #2d4264);color:#c6dcff;}.ds-rail-button:hover:not(:disabled){background:#393c43;}.ds-rail-button:focus-visible{outline:2px solid var(--blue, #88b4fa);outline-offset:-2px;}"
+    },
+    {
+      "name": "Results Grid",
+      "kind": "custom",
+      "refersTo": "results-grid",
+      "description": "Static source-derived grid sample. Production controller supplies returned rows, sorting, and row detail. Sample values are preview-only.",
+      "html": "<div class=\"ds-grid-wrap\"><table class=\"ds-grid\" aria-label=\"Query results\"><thead><tr><th class=\"ds-row-number\">#</th><th><button class=\"ds-grid-heading\" type=\"button\">id</button></th><th><button class=\"ds-grid-heading\" type=\"button\">name</button></th></tr></thead><tbody><tr><td class=\"ds-row-number\"><button class=\"ds-row-open\" type=\"button\" aria-label=\"Open row 1\">1</button></td><td>42</td><td>Sample value</td></tr><tr><td class=\"ds-row-number\"><button class=\"ds-row-open\" type=\"button\" aria-label=\"Open row 2\">2</button></td><td>43</td><td><span class=\"ds-null\">NULL</span></td></tr></tbody></table></div>",
+      "css": ".ds-grid-wrap{overflow:auto;background:var(--editor, #1e1f22);}.ds-grid{border-collapse:separate;border-spacing:0;min-width:100%;width:max-content;color:var(--text, #dfe1e5);font:12px/1.5 var(--mono, \"JetBrains Mono\", \"SFMono-Regular\", Consolas, \"Liberation Mono\", monospace);font-variant-numeric:tabular-nums;}.ds-grid th,.ds-grid td{height:29px;padding:4px 12px;border-right:1px solid #34363b;border-bottom:1px solid #303237;text-align:left;max-width:420px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}.ds-grid th{position:sticky;top:0;z-index:1;padding:0;background:var(--chrome, #2b2d30);color:#c9cdd6;font-weight:500;}.ds-grid-heading,.ds-row-open{display:block;width:100%;border:1px solid transparent;border-radius:0;background:transparent;color:inherit;font:inherit;cursor:pointer;}.ds-grid-heading{padding:6px 12px;text-align:left;}.ds-grid .ds-row-number{position:sticky;left:0;min-width:48px;width:48px;padding:0;text-align:right;background:var(--tree, #25262a);color:var(--muted, #a8adb8);}.ds-row-open{padding:4px 9px;text-align:right;}.ds-grid thead .ds-row-number{z-index:2;padding:4px 9px;}.ds-grid tbody tr:hover td{background:#283344;}.ds-grid tbody tr:focus-within td{background:var(--selection, #2d4264);}.ds-grid-heading:hover:not(:disabled),.ds-row-open:hover:not(:disabled){background:#393c43;}.ds-grid-heading:focus-visible,.ds-row-open:focus-visible{outline:2px solid var(--blue, #88b4fa);outline-offset:-2px;}.ds-null{color:#a4a9b5;font-style:italic;}"
+    }
+  ],
+  "narrative": {
+    "northStar": "DataGrip New UI workbench",
+    "overview": "The implemented world follows the user's pinned dark DataGrip New UI reference: graphite tool chrome, darker editing surfaces, restrained state colors, and compact controls. The interface gives database objects, SQL, and returned data a shared working frame. System UI text carries controls and navigation; monospace carries SQL, data, and measurements. There is no display type role.\n\nDurable product commitments are the GridBase name, the dark IDE character, and keeping objects, SQL, and results within one working screen. This record describes `public/styles.css`, `public/index.html`, and the component and layout behavior in `public/app.js`. It records implementation evidence, not visual approval: the browser host was unavailable, desktop and mobile captures are missing, and the finish review requires recapture. Apparent legibility and responsive fit still need rendered verification; source values are not proof of that verification.",
+    "keyCharacteristics": [
+      "Dense pane boundaries and aligned toolbars rather than spacious dashboard cards.",
+      "Blue selection and focus, green execution and connection success, coral errors.",
+      "Flat working surfaces with soft shadows reserved for floating layers.",
+      "Authored outline SVG icons and monospace SQL and data."
+    ],
+    "rules": [
+      {
+        "name": "The State Color Rule",
+        "body": "Blue identifies interaction; green identifies execution or connection success; coral identifies errors. Keep SQL syntax colors inside code.",
+        "section": "colors"
+      },
+      {
+        "name": "The Content Type Rule",
+        "body": "Use the UI stack for application controls and the monospace stack for SQL, returned values, and measurements. Preserve matching editor and gutter metrics.",
+        "section": "typography"
+      },
+      {
+        "name": "The Working Plane Rule",
+        "body": "Keep the explorer, editor, and grid flat. Reserve soft, offset shadows for the implemented floating layers.",
+        "section": "elevation"
+      }
+    ],
+    "dos": [
+      "Do keep persistent working areas edge-aligned, compact, and separated by tone and thin rules.",
+      "Do preserve the State Color Rule and keep syntax colors associated with SQL roles.",
+      "Do keep SQL and gutter metrics identical and reserve monospace for SQL, data, and measurements.",
+      "Do include visible keyboard focus and pair connection or query state colors with text.",
+      "Do preserve pane-level scrolling, truncation with access to full content, and the overlay behavior at narrow widths."
+    ],
+    "donts": [
+      "Don't replace the confirmed dark IDE world with a spacious card dashboard.",
+      "Don't add decorative shadows to persistent explorer, editor, or results panes.",
+      "Don't introduce a display type voice into the compact application hierarchy.",
+      "Don't replace the consistent SVG icon system with text glyphs or proprietary branding assets.",
+      "Don't treat source inspection or synthetic controller tests as rendered design approval; capture desktop and mobile before claiming visual fit."
+    ]
+  }
+}

@@ -5,48 +5,59 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.HashMap;
 import java.util.Map;
-import java.util.Set;
 
 public final class AppConfig {
     private static final int MAX_JDBC_URL_LENGTH = 2048;
     private static final int MAX_USERNAME_LENGTH = 256;
     private static final int MAX_PASSWORD_LENGTH = 2048;
-    private static final Set<String> RUNTIME_CREDENTIAL_KEYS = Set.of("THRIFT_JDBC_URL", "THRIFT_USERNAME", "THRIFT_PASSWORD");
 
     public final String host;
     public final int port;
     public final int timeoutSeconds;
-    public final int maxRows;
+    public final int defaultQueryLimit;
     public final Path publicDir;
 
-    private volatile String jdbcUrl;
-    private volatile String username;
-    private volatile String password;
+    private final String jdbcUrl;
+    private final String username;
+    private final String password;
 
     private AppConfig(String host, int port, String jdbcUrl, String username, String password,
-                      int timeoutSeconds, int maxRows, Path publicDir) {
+                      int timeoutSeconds, int defaultQueryLimit, Path publicDir) {
         this.host = host;
         this.port = port;
         this.jdbcUrl = jdbcUrl;
         this.username = username;
         this.password = password;
         this.timeoutSeconds = timeoutSeconds;
-        this.maxRows = maxRows;
+        this.defaultQueryLimit = defaultQueryLimit;
         this.publicDir = publicDir;
     }
 
     public static AppConfig load(Path projectRoot) {
+        return load(projectRoot, System.getenv());
+    }
+
+    static AppConfig load(Path projectRoot, Map<String, String> environment) {
         Map<String, String> fileValues = readDotEnv(projectRoot.resolve(".env"));
-        return new AppConfig(
-                value("HOST", fileValues, "127.0.0.1"),
-                boundedInt(value("PORT", fileValues, "4173"), 1, 65535, 4173),
-                "",
-                "",
-                "",
-                boundedInt(value("QUERY_TIMEOUT_MS", fileValues, "30000"), 1000, 120000, 30000) / 1000,
-                boundedInt(value("MAX_QUERY_ROWS", fileValues, "1000"), 1, 10000, 1000),
+        AppConfig config = new AppConfig(
+                value("HOST", environment, fileValues, "127.0.0.1"),
+                boundedInt(value("PORT", environment, fileValues, "4173"), 1, 65535, 4173),
+                value("THRIFT_JDBC_URL", environment, fileValues, "").trim(),
+                value("THRIFT_USERNAME", environment, fileValues, "").trim(),
+                value("THRIFT_PASSWORD", environment, fileValues, ""),
+                boundedInt(value("QUERY_TIMEOUT_MS", environment, fileValues, "30000"), 1000, 120000, 30000) / 1000,
+                boundedInt(value("DEFAULT_QUERY_LIMIT", environment, fileValues, "50"), 1, 10000, 50),
                 projectRoot.resolve("public").toAbsolutePath().normalize()
         );
+        if (config.configured()) {
+            requireValue(config.jdbcUrl, "JDBC URL", MAX_JDBC_URL_LENGTH);
+            requireValue(config.username, "username", MAX_USERNAME_LENGTH);
+            requireValue(config.password, "password", MAX_PASSWORD_LENGTH);
+            if (!config.jdbcUrl.startsWith("jdbc:hive2://")) {
+                throw new IllegalArgumentException("JDBC URL harus menggunakan jdbc:hive2://.");
+            }
+        }
+        return config;
     }
 
     public boolean configured() {
@@ -65,28 +76,16 @@ public final class AppConfig {
         return password;
     }
 
-    public synchronized void configure(String jdbcUrl, String username, String password) {
-        String normalizedJdbcUrl = requireValue(jdbcUrl, "JDBC URL", MAX_JDBC_URL_LENGTH).trim();
-        String normalizedUsername = requireValue(username, "username", MAX_USERNAME_LENGTH).trim();
-        String normalizedPassword = requireValue(password, "password", MAX_PASSWORD_LENGTH);
-        if (!normalizedJdbcUrl.startsWith("jdbc:hive2://")) {
-            throw new IllegalArgumentException("JDBC URL harus menggunakan jdbc:hive2://.");
-        }
-        this.jdbcUrl = normalizedJdbcUrl;
-        this.username = normalizedUsername;
-        this.password = normalizedPassword;
-    }
-
     public String redactedTarget() {
         String configuredUrl = jdbcUrl();
         if (configuredUrl.isBlank()) return null;
         return configuredUrl.replaceAll("(?i)((?:^|[;?&])(password|token|secret)=)[^;&]*", "$1••••••");
     }
 
-    private static String value(String key, Map<String, String> fileValues, String fallback) {
-        String environment = System.getenv(key);
-        return environment != null && !environment.isBlank()
-                ? environment
+    private static String value(String key, Map<String, String> environment, Map<String, String> fileValues, String fallback) {
+        String environmentValue = environment.get(key);
+        return environmentValue != null && !environmentValue.isBlank()
+                ? environmentValue
                 : fileValues.getOrDefault(key, fallback);
     }
 
@@ -114,9 +113,8 @@ public final class AppConfig {
                 int separator = trimmed.indexOf('=');
                 if (separator <= 0) continue;
                 String key = trimmed.substring(0, separator).trim();
-                if (RUNTIME_CREDENTIAL_KEYS.contains(key)) continue;
                 String value = trimmed.substring(separator + 1).trim();
-                if ((value.startsWith("'") && value.endsWith("'")) || (value.startsWith("\"") && value.endsWith("\""))) {
+                if (value.length() >= 2 && ((value.startsWith("'") && value.endsWith("'")) || (value.startsWith("\"") && value.endsWith("\"")))) {
                     value = value.substring(1, value.length() - 1);
                 }
                 values.put(key, value);

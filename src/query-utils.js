@@ -1,12 +1,11 @@
 const MAX_SQL_LENGTH = 20_000;
 
-const READ_ONLY_START = /^(select|with|show|describe|desc|explain)\b/i;
-const MUTATION_WORD = /\b(insert|update|delete|drop|alter|truncate|create|merge|grant|revoke|msck|load|set|reset|use)\b/i;
+const SQL_START = /^(select|with|show|describe|desc|explain|create|insert|update|delete|merge|alter|drop|truncate)\b/i;
+const SQL_QUOTE_OR_COMMENT = /'(?:''|\\[\s\S]|[^'\\])*'|"(?:""|\\[\s\S]|[^"\\])*"|`(?:``|[^`])*`|\/\*[\s\S]*?\*\/|--[^\r\n]*/g;
 
 function stripSqlComments(sql) {
   return sql
-    .replace(/\/\*[\s\S]*?\*\//g, " ")
-    .replace(/--[^\r\n]*/g, " ")
+    .replace(SQL_QUOTE_OR_COMMENT, (token) => token.startsWith("/*") || token.startsWith("--") ? " " : token)
     .trim();
 }
 
@@ -17,24 +16,57 @@ function validateQuery(input, options = {}) {
     return { ok: false, error: "Query harus berupa teks." };
   }
 
-  const sql = stripSqlComments(input).replace(/;+\s*$/, "").trim();
+  if (input.length > maxLength) {
+    return { ok: false, error: `Query terlalu panjang. Maksimal ${maxLength.toLocaleString("id-ID")} karakter.` };
+  }
+  if (/\0/.test(input)) {
+    return { ok: false, error: "Query mengandung karakter yang tidak valid." };
+  }
+  const sql = stripSqlComments(input).replace(/;\s*$/, "").trim();
   if (!sql) {
     return { ok: false, error: "Query tidak boleh kosong." };
   }
-  if (sql.length > maxLength) {
-    return { ok: false, error: `Query terlalu panjang. Maksimal ${maxLength.toLocaleString("id-ID")} karakter.` };
+  const code = sql.replace(SQL_QUOTE_OR_COMMENT, "?");
+  if (code.includes(";") || /(^|\n)\s*!/.test(code)) {
+    return { ok: false, error: "Jalankan satu perintah SQL dalam satu query." };
   }
-  if (/\0/.test(sql)) {
-    return { ok: false, error: "Query mengandung karakter yang tidak valid." };
-  }
-  if (!READ_ONLY_START.test(sql)) {
-    return { ok: false, error: "Mode aman hanya mengizinkan SELECT, WITH, SHOW, DESCRIBE, dan EXPLAIN." };
-  }
-  if (MUTATION_WORD.test(sql)) {
-    return { ok: false, error: "Query perubahan data diblokir karena workbench berjalan dalam mode read-only." };
+  if (!SQL_START.test(code)) {
+    return { ok: false, error: "Perintah SQL tidak didukung. Gunakan query data atau perintah CREATE, INSERT, UPDATE, DELETE, MERGE, ALTER, DROP, atau TRUNCATE." };
   }
 
   return { ok: true, sql };
+}
+
+function queryResultLimit(sql, defaultLimit = 50) {
+  const masked = sql.replace(SQL_QUOTE_OR_COMMENT, token => (token.startsWith('/*') || token.startsWith('--') ? ' ' : '?').repeat(token.length));
+  const words = [];
+  let depth = 0;
+  for (const token of masked.matchAll(/[a-z_][a-z0-9_$]*|[()]/gi)) {
+    if (token[0] === '(') depth++;
+    else if (token[0] === ')') depth--;
+    else if (depth === 0) words.push({ word: token[0].toUpperCase(), start: token.index, end: token.index + token[0].length });
+  }
+  let command = words[0]?.word;
+  if (command === 'WITH') command = words.find(t => /^(SELECT|INSERT|UPDATE|DELETE|MERGE)$/.test(t.word))?.word;
+  if (command !== 'SELECT') return { sql, rowLimit: defaultLimit };
+  for (let i = words.length - 1; i > 0; i--) {
+    const token = words[i];
+    if (token.word !== 'LIMIT') continue;
+    const previous = words[i-1];
+    if (/^(SELECT|FROM|JOIN|AS|WHERE|AND|OR|ON|BY|INTO|TABLE|UPDATE)$/.test(previous.word) && !masked.slice(previous.end,token.start).trim()) continue;
+    const before = masked.slice(0,token.start).trimEnd();
+    if (before && '.,><=!+-*/%'.includes(before.at(-1))) continue;
+    if (words.slice(i+1).some(t => /^(SELECT|FROM|WHERE|GROUP|HAVING|ORDER|UNION|INTERSECT|EXCEPT|JOIN|LATERAL|WINDOW|QUALIFY|AS|ASC|DESC|NULLS|FIRST|LAST|INSERT|UPDATE|DELETE|MERGE)$/.test(t.word))) continue;
+    const value = masked.slice(token.end);
+    if (!/^\s*(?:NULL\b|ALL\b|CASE\b|[+-]?\d|\(|[a-z_][a-z0-9_$]*\s*\()/i.test(value)) continue;
+    const nullValue = value.match(/^\s*NULL\b/i);
+    if (nullValue) {
+      const start = token.end + nullValue[0].length - 4;
+      return { sql: sql.slice(0, start) + defaultLimit + sql.slice(start + 4), rowLimit: defaultLimit };
+    }
+    return { sql, rowLimit: null };
+  }
+  return { sql, rowLimit: defaultLimit };
 }
 
 function parseCsvLine(line) {
@@ -132,6 +164,7 @@ module.exports = {
   extractDatabases,
   extractNamespaces,
   MAX_SQL_LENGTH,
+  queryResultLimit,
   parseCsv,
   parseCsvLine,
   redactJdbcUrl,

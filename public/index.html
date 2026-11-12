@@ -1,159 +1,90 @@
 <!doctype html>
 <html lang="id">
-  <head>
-    <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <meta name="theme-color" content="#0b1320" />
-    <title>Thrift Query Workbench</title>
-    <link rel="stylesheet" href="/styles.css" />
-  </head>
-  <body>
-    <div class="app-shell">
-      <aside class="sidebar" aria-label="Navigasi workbench">
-        <div class="brand-lockup">
-          <div class="brand-mark" aria-hidden="true"><span></span><span></span><span></span></div>
-          <div>
-            <div class="brand-name">thrift</div>
-            <div class="brand-subtitle">query workbench</div>
-          </div>
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="theme-color" content="#2b2d30" />
+  <title>GridBase</title>
+  <link rel="stylesheet" href="/styles.css" />
+</head>
+<body>
+  <svg class="icon-definitions" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><defs>
+    <symbol id="i-database" viewBox="0 0 20 20"><ellipse cx="10" cy="4.5" rx="6" ry="2.5"/><path d="M4 4.5v11c0 3.3 12 3.3 12 0v-11M4 10c0 3.3 12 3.3 12 0"/></symbol>
+    <symbol id="i-history" viewBox="0 0 20 20"><path d="M3 8a7 7 0 1 1 0 5M3 3v5h5M10 6v4l3 2"/></symbol>
+    <symbol id="i-plus" viewBox="0 0 20 20"><path d="M10 4v12M4 10h12"/></symbol>
+    <symbol id="i-close" viewBox="0 0 20 20"><path d="m5 5 10 10M5 15 15 5"/></symbol>
+    <symbol id="i-refresh" viewBox="0 0 20 20"><path d="M16 7a6.5 6.5 0 1 0 .3 5M16 3v4h-4"/></symbol>
+    <symbol id="i-play" viewBox="0 0 20 20"><path d="m6 4 10 6-10 6Z"/></symbol>
+    <symbol id="i-chevron" viewBox="0 0 20 20"><path d="m7 4 6 6-6 6"/></symbol>
+    <symbol id="i-table" viewBox="0 0 20 20"><rect x="3" y="3" width="14" height="14" rx="1"/><path d="M3 8h14M8 8v9M3 12.5h14"/></symbol>
+    <symbol id="i-schema" viewBox="0 0 20 20"><path d="M3 6V3h5l2 3h7v11H3Z"/></symbol>
+    <symbol id="i-code" viewBox="0 0 20 20"><path d="m6 5-4 5 4 5m8-10 4 5-4 5M11 3 9 17"/></symbol>
+    <symbol id="i-search" viewBox="0 0 20 20"><circle cx="8.5" cy="8.5" r="5"/><path d="m12 12 5 5"/></symbol>
+    <symbol id="i-panel" viewBox="0 0 20 20"><rect x="2.5" y="3" width="15" height="14" rx="1"/><path d="M8 3v14"/></symbol>
+    <symbol id="i-download" viewBox="0 0 20 20"><path d="M10 2v10m-4-4 4 4 4-4M3 13v4h14v-4"/></symbol>
+    <symbol id="i-format" viewBox="0 0 20 20"><path d="M3 4h14M7 8h10M7 12h7M3 16h14M2 8l3 2-3 2"/></symbol>
+    <symbol id="i-edit" viewBox="0 0 20 20"><path d="m3 13 10-10 4 4L7 17H3Zm8-8 4 4"/></symbol>
+  </defs></svg>
+  <a class="skip-link" href="#sql-editor">Skip to SQL editor</a>
+  <div id="app" class="ide-shell">
+    <header class="titlebar">
+      <svg class="product-icon" aria-hidden="true"><use href="#i-database"/></svg>
+      <h1>GridBase</h1><span class="title-divider"></span><span class="project-name">s3tables</span>
+      <span id="connection-status" class="connection-status" role="status"><span class="status-dot"></span><span id="connection-label">Checking server…</span></span>
+      <button id="retry-connection" class="icon-button" type="button" title="Check connection" aria-label="Check connection"><svg><use href="#i-refresh"/></svg></button>
+    </header>
+    <nav class="tool-rail" aria-label="Tool windows">
+      <button id="database-tool" class="rail-button is-active" type="button" aria-label="Database explorer" title="Database explorer" aria-controls="sidebar" aria-expanded="true"><svg><use href="#i-database"/></svg></button>
+      <button id="history-tool" class="rail-button" type="button" aria-label="Query history" title="Query history" aria-controls="sidebar" aria-expanded="false"><svg><use href="#i-history"/></svg></button>
+    </nav>
+    <button id="sidebar-backdrop" class="sidebar-backdrop" type="button" aria-label="Close tool window" hidden></button>
+    <aside id="sidebar" class="sidebar" aria-label="Database explorer">
+      <header class="pane-heading"><h2 id="sidebar-heading">Database</h2><div class="button-group"><button id="refresh-metadata" class="icon-button" type="button" title="Refresh metadata" aria-label="Refresh metadata"><svg><use href="#i-refresh"/></svg></button><button id="hide-sidebar" class="icon-button" type="button" title="Hide tool window" aria-label="Hide tool window"><svg><use href="#i-panel"/></svg></button></div></header>
+      <div id="database-view" class="sidebar-view">
+        <label class="search-field"><svg aria-hidden="true"><use href="#i-search"/></svg><input id="object-filter" type="search" placeholder="Filter loaded objects" aria-label="Filter loaded database objects" autocomplete="off" /></label>
+        <div class="catalog-root"><svg aria-hidden="true"><use href="#i-database"/></svg><strong>s3tables</strong><span id="schema-count"></span></div>
+        <nav id="schema-list" class="schema-list" aria-label="Database objects" aria-busy="true"><p class="pane-note">Loading schemas…</p></nav>
+      </div>
+      <div id="history-view" class="sidebar-view" hidden><div class="history-heading"><span>Recent executions · <span id="history-count">0</span>/5</span><button id="clear-history" class="text-button" type="button">Clear</button></div><div id="history-list" class="history-list"></div></div>
+      <footer class="sidebar-footer">SQL drafts saved in this browser<br />Query results stay in memory</footer>
+    </aside>
+    <div id="sidebar-resizer" class="sidebar-resizer" role="separator" tabindex="0" aria-label="Explorer width" aria-orientation="vertical" aria-valuemin="200" aria-valuemax="420" aria-valuenow="260"></div>
+    <main class="workbench">
+      <div class="console-bar"><div id="console-tabs" class="console-tabs" role="tablist" aria-label="SQL consoles"></div><button id="new-console" class="icon-button" type="button" title="New SQL console" aria-label="New SQL console"><svg><use href="#i-plus"/></svg></button></div>
+      <div id="connection-notice" class="connection-notice" role="status" hidden></div>
+      <section id="console-panel" class="console-panel" role="tabpanel" aria-label="SQL console">
+        <div class="editor-toolbar">
+          <button id="run-query" class="run-button" type="button" disabled title="Execute selection or current statement (Ctrl/Cmd+Enter)"><svg aria-hidden="true"><use href="#i-play"/></svg><span>Execute</span></button>
+          <span class="toolbar-divider"></span>
+          <button id="format-query" class="tool-button" type="button" title="Format SQL"><svg aria-hidden="true"><use href="#i-format"/></svg><span>Format</span></button>
+          <button id="rename-console" class="icon-button" type="button" title="Rename console" aria-label="Rename console"><svg><use href="#i-edit"/></svg></button>
+          <span id="console-context" class="console-context">Spark SQL</span><span class="execute-shortcut">Ctrl / ⌘ + Enter</span>
         </div>
-
-        <div class="sidebar-label">Workspace</div>
-        <nav class="nav-stack" aria-label="Workspace views">
-          <button class="nav-item is-active" type="button" data-view="query">
-            <span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 20 20" focusable="false"><path d="M4 5.5h12M4 10h8M4 14.5h12" /></svg></span><span>Query desk</span>
-          </button>
-          <button class="nav-item" type="button" data-view="history">
-            <span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 20 20" focusable="false"><circle cx="10" cy="10" r="6.5" /><path d="M10 6.5v3.8l2.7 1.7" /></svg></span><span>Run history</span>
-          </button>
-        </nav>
-
-        <section class="s3tables-block" aria-labelledby="s3tables-heading">
-          <div class="sidebar-label s3tables-heading">
-            <span id="s3tables-heading">s3tables</span>
-            <button id="refresh-s3tables" class="sidebar-action" type="button" aria-label="Refresh s3tables" title="Refresh s3tables">
-              <svg viewBox="0 0 20 20" focusable="false"><path d="M16 6.5A6.5 6.5 0 1 0 16.2 11" /><path d="M16 3.8v3.8h-3.8" /></svg>
-            </button>
-          </div>
-          <div id="s3tables-list" class="s3tables-list" aria-live="polite" aria-label="Available s3tables">
-            <p class="s3tables-state">Loading s3tables…</p>
-          </div>
-        </section>
-
-        <div class="history-block">
-          <div class="sidebar-label history-heading"><span>Recent queries</span><span id="history-count">0</span></div>
-          <div id="history-list" class="history-list" aria-live="polite">
-            <p class="history-empty">Your recent runs will appear here.</p>
-          </div>
+        <div id="editor-body" class="editor-body">
+          <div id="line-numbers" class="line-numbers" aria-hidden="true">1</div>
+          <div class="code-surface"><pre id="sql-highlight" class="sql-highlight" aria-hidden="true"></pre><textarea id="sql-editor" spellcheck="false" autocapitalize="off" autocomplete="off" autocorrect="off" wrap="off" maxlength="20000" aria-label="SQL query editor" aria-describedby="editor-help"></textarea></div>
         </div>
-
-        <div class="sidebar-footer">
-          <div class="security-note"><span class="lock-dot" aria-hidden="true"><svg viewBox="0 0 20 20" focusable="false"><rect x="4.5" y="8.5" width="11" height="8" rx="1.5" /><path d="M7 8.5V6.7a3 3 0 0 1 6 0v1.8" /></svg></span><span>Credentials stay on this server</span></div>
-          <div class="version">LOCAL WORKBENCH · 0.1</div>
-        </div>
-      </aside>
-
-      <main class="workspace">
-        <header class="topbar">
-          <div class="breadcrumb"><span>Workspace</span><span class="slash">/</span><strong>Query desk</strong></div>
-          <div class="topbar-actions">
-            <span class="read-only-pill"><span class="status-dot"></span> Read-only mode</span>
-            <button class="icon-button" id="new-query" type="button" aria-label="New query" title="New query"><svg viewBox="0 0 20 20" focusable="false"><path d="M10 4v12M4 10h12" /></svg></button>
-            <div class="avatar" aria-label="Local session">BQ</div>
-          </div>
-        </header>
-
-        <div class="content-wrap">
-          <section class="workspace-overview" aria-labelledby="page-title">
-            <div class="workspace-overview-main">
-              <div class="workspace-signal" aria-hidden="true"><span></span><span></span><span></span></div>
-              <div>
-                <h1 id="page-title">Query studio</h1>
-                <p class="workspace-subtitle">A focused workspace for exploring Spark data.</p>
-              </div>
-            </div>
-            <div class="workspace-overview-side">
-              <div class="catalog-chip"><span>Catalog</span><strong>s3tables</strong></div>
-              <div class="connection-card" aria-label="Connection status">
-                <div class="connection-card-top"><span class="connection-kicker">CONNECTED TO</span><span id="health-badge" class="health-badge is-pending">checking</span></div>
-                <div class="connection-host" id="connection-host">Spark Thrift Server</div>
-                <div class="connection-meta"><span class="mini-dot"></span><span id="connection-detail">Checking server configuration…</span></div>
-              </div>
-            </div>
-          </section>
-
-          <section class="query-section" aria-labelledby="query-heading">
-            <div class="section-heading">
-              <div><span class="section-index">01</span><h2 id="query-heading">Compose a query</h2></div>
-              <span class="shortcut-hint"><kbd>⌘</kbd><kbd>↵</kbd> to run</span>
-            </div>
-            <div class="editor-card">
-              <div class="editor-toolbar">
-                <div class="file-tab"><span class="file-dot"></span>untitled.sql</div>
-                <div class="editor-actions"><button id="format-query" class="text-button" type="button">Format</button><button id="copy-query" class="text-button" type="button">Copy</button></div>
-              </div>
-              <div class="editor-body">
-                <div id="line-numbers" class="line-numbers" aria-hidden="true">1</div>
-                <textarea id="sql-editor" spellcheck="false" aria-label="SQL query editor">SELECT
-  current_date() AS today,
-  current_database() AS database;</textarea>
-              </div>
-              <div class="editor-footer"><span>SQL · Spark dialect</span><span id="char-count">0 characters</span></div>
-            </div>
-            <div class="run-row">
-              <div class="safety-copy"><span class="shield-icon" aria-hidden="true"><svg viewBox="0 0 20 20" focusable="false"><path d="m10 3 5 2v4.3c0 3.1-2 5.8-5 7.7-3-1.9-5-4.6-5-7.7V5l5-2Z" /><path d="m7.5 10 1.6 1.6 3.4-3.4" /></svg></span><span>Only read queries are allowed in this workspace.</span></div>
-              <button id="run-query" class="run-button" type="button"><span class="run-glyph" aria-hidden="true"><svg viewBox="0 0 20 20" focusable="false"><path d="m7 4.7 7 5.3-7 5.3V4.7Z" /></svg></span><span>Run query</span><kbd>⌘↵</kbd></button>
-            </div>
-          </section>
-
-          <section class="results-section" aria-labelledby="results-heading">
-            <div class="section-heading results-heading">
-              <div><span class="section-index">02</span><h2 id="results-heading">Results</h2></div>
-              <div class="result-metrics" aria-live="polite"><span id="row-count">— rows</span><span class="metric-separator">·</span><span id="duration">—</span></div>
-            </div>
-            <div id="results-panel" class="results-panel">
-              <div id="results-empty" class="results-empty">
-                <div class="empty-orbit" aria-hidden="true"><span></span><span></span><span></span></div>
-                <h3>Nothing queried yet</h3>
-                <p>Your result set will settle here.<br />Start with the sample query above.</p>
-              </div>
-              <div id="results-loading" class="results-loading" hidden><span class="loading-bar"></span><span class="loading-bar"></span><span class="loading-bar"></span><p>Asking Spark for an answer…</p></div>
-              <div id="results-error" class="results-error" role="alert" hidden><div class="error-icon" aria-hidden="true">!</div><div><h3>Query could not run</h3><p id="error-message">Check the connection and try again.</p></div></div>
-              <div id="results-table-wrap" class="results-table-wrap" hidden></div>
-            </div>
-            <div id="row-detail" class="row-detail" role="dialog" aria-modal="true" aria-labelledby="row-detail-heading" hidden>
-              <div class="row-detail-card">
-                <div class="row-detail-header">
-                  <div><span class="row-detail-kicker">TRANSPOSED VIEW</span><h3 id="row-detail-heading">Row detail</h3></div>
-                  <button id="close-row-detail" class="row-detail-close" type="button" aria-label="Close row detail">×</button>
-                </div>
-                <div id="row-detail-table-wrap" class="row-detail-table-wrap"></div>
-              </div>
-            </div>
-          </section>
-        </div>
-        <footer class="page-footer"><span>Run locally · results are not persisted · history stays in this browser</span><span id="toast" role="status" aria-live="polite"></span></footer>
-      </main>
-    </div>
-    <div id="setup-gate" class="setup-gate" hidden>
-      <section class="setup-card" role="dialog" aria-modal="true" aria-labelledby="setup-heading" aria-describedby="setup-description">
-        <div class="setup-card-header">
-          <span class="setup-kicker">FIRST SESSION</span>
-          <span class="setup-lock" aria-hidden="true">●</span>
-        </div>
-        <h2 id="setup-heading">Connect your Spark warehouse</h2>
-        <p id="setup-description">Enter the JDBC connection details to start this local workbench. They are kept in server memory for this session and are never saved in browser storage.</p>
-        <form id="setup-form" class="setup-form">
-          <label class="setup-field" for="setup-jdbc-url"><span>THRIFT_JDBC_URL</span><input id="setup-jdbc-url" name="jdbcUrl" type="text" inputmode="url" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" placeholder="jdbc:hive2://host:443/default;..." required /></label>
-          <label class="setup-field" for="setup-username"><span>THRIFT_USERNAME</span><input id="setup-username" name="username" type="text" autocomplete="off" autocapitalize="off" autocorrect="off" required /></label>
-          <label class="setup-field" for="setup-password"><span>THRIFT_PASSWORD</span><input id="setup-password" name="password" type="password" autocomplete="new-password" required /></label>
-          <p id="setup-error" class="setup-error" role="alert" hidden></p>
-          <button id="setup-submit" class="setup-submit" type="submit"><span>Connect to Spark</span><span aria-hidden="true">↗</span></button>
-        </form>
-        <p class="setup-note">For security, restarting the server clears these credentials and asks for them again.</p>
+        <p id="editor-help" class="sr-only">Ctrl or Command Enter executes the selected SQL or the statement at the caret. Tab indents; Escape moves focus to the Format button so Tab can navigate other controls. Ctrl Space offers SQL and loaded object suggestions.</p>
+        <div id="completion-panel" class="completion-panel" hidden><label for="completion-select">SQL suggestions</label><select id="completion-select" size="5" aria-label="SQL suggestions"></select><div class="completion-actions"><span>Enter to insert · Esc to close</span><button id="close-completion" class="text-button" type="button">Close</button></div></div>
+        <footer class="editor-status"><span>Spark SQL <span class="subtle-separator">/</span> <span id="editor-size">0 characters</span></span><span id="caret-position">Ln 1, Col 1</span></footer>
       </section>
-    </div>
-    <script src="/app.js" defer></script>
-  </body>
+      <div id="results-resizer" class="results-resizer" role="separator" tabindex="0" aria-label="Editor height" aria-orientation="horizontal" aria-valuemin="20" aria-valuemax="75" aria-valuenow="45"></div>
+      <section class="results-dock" aria-label="Query results and output">
+        <header class="dock-header"><div class="dock-tabs" role="tablist" aria-label="Query output views"><button id="results-tab" class="dock-tab is-active" type="button" role="tab" aria-selected="true" aria-controls="results-view">Results <span id="result-count"></span></button><button id="output-tab" class="dock-tab" type="button" role="tab" aria-selected="false" aria-controls="output-view" tabindex="-1">Output</button></div><span id="result-metrics" class="result-metrics"></span></header>
+        <div id="results-view" class="results-view" role="tabpanel" aria-labelledby="results-tab">
+          <div id="result-toolbar" class="result-toolbar" hidden><label class="search-field"><svg aria-hidden="true"><use href="#i-search"/></svg><input id="result-filter" type="search" aria-label="Filter returned rows" placeholder="Filter returned rows" /></label><span class="export-actions"><svg aria-hidden="true"><use href="#i-download"/></svg><button id="export-csv" class="text-button" type="button" title="Download all filtered rows as CSV">CSV</button><button id="export-json" class="text-button" type="button" title="Download all filtered rows as JSON">JSON</button></span></div>
+          <div id="result-state" class="result-state" role="status"><svg aria-hidden="true"><use href="#i-code"/></svg><h2>Ready to query</h2><p>Write SQL above, then execute a statement.<br />Open a table from Database to preview 50 rows.</p></div>
+          <div id="results-table-wrap" class="results-table-wrap" hidden></div>
+          <nav id="results-pagination" class="results-pagination" aria-label="Results pagination" hidden><span id="results-range" role="status"></span><div class="pagination-controls"><button id="results-previous" class="text-button" type="button" disabled>Previous</button><span id="results-page"></span><button id="results-next" class="text-button" type="button" disabled>Next</button><span class="page-size">10 / page</span></div></nav>
+        </div>
+        <div id="output-view" class="output-view" role="tabpanel" aria-labelledby="output-tab" hidden><pre id="query-output">No statements executed in this console.</pre></div>
+      </section>
+    </main>
+    <footer class="statusbar"><span id="toast" role="status" aria-live="polite">Ready</span><span class="statusbar-right"><span id="server-state">Server configuration</span><span>UTF-8</span><span>SQL</span></span></footer>
+  </div>
+  <dialog id="rename-dialog" class="workbench-dialog" aria-labelledby="rename-heading"><form id="rename-form"><h2 id="rename-heading">Rename console</h2><label for="console-name">Console name</label><input id="console-name" maxlength="80" required autocomplete="off" /><div class="dialog-actions"><button id="cancel-rename" class="tool-button" type="button">Cancel</button><button class="primary-button" type="submit">Save</button></div></form></dialog>
+  <dialog id="row-detail" class="workbench-dialog row-detail" aria-labelledby="row-detail-heading"><header class="pane-heading"><h2 id="row-detail-heading">Row detail</h2><button id="close-row-detail" class="icon-button" type="button" aria-label="Close row detail"><svg><use href="#i-close"/></svg></button></header><div id="row-detail-table-wrap" class="row-detail-table-wrap"></div></dialog>
+  <script src="/workbench-core.js" defer></script>
+  <script src="/app.js" defer></script>
+</body>
 </html>
-

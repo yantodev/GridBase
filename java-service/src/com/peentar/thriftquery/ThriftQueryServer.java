@@ -8,6 +8,10 @@ import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.net.InetSocketAddress;
+import java.net.URLDecoder;
+import java.util.HashMap;
+import java.util.Map;
+import java.util.stream.Collectors;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -50,14 +54,15 @@ public final class ThriftQueryServer {
     private void start() throws IOException {
         server = HttpServer.create(new InetSocketAddress(config.host, config.port), 0);
         server.createContext("/api/health", this::health);
-        server.createContext("/api/setup", this::setup);
         server.createContext("/api/query", this::query);
         server.createContext("/api/databases", this::databases);
         server.createContext("/api/namespaces", this::namespaces);
+        server.createContext("/api/tables", exchange -> metadata(exchange, false));
+        server.createContext("/api/columns", exchange -> metadata(exchange, true));
         server.createContext("/", this::staticFiles);
         server.setExecutor(executor);
         server.start();
-        System.out.println("Thrift Query Workbench (Java JDBC) running at http://" + config.host + ":" + config.port);
+        System.out.println("GridBase (Java JDBC) running at http://" + config.host + ":" + config.port);
         System.out.println("JDBC driver: org.apache.hive.jdbc.HiveDriver");
     }
 
@@ -74,33 +79,11 @@ public final class ThriftQueryServer {
         sendJson(exchange, 200, healthPayload());
     }
 
-    private void setup(HttpExchange exchange) throws IOException {
-        if (!"POST".equals(exchange.getRequestMethod())) {
-            methodNotAllowed(exchange);
-            return;
-        }
-        try {
-            String body = readBody(exchange);
-            config.configure(
-                    JsonUtil.stringField(body, "jdbcUrl"),
-                    JsonUtil.stringField(body, "username"),
-                    JsonUtil.stringField(body, "password")
-            );
-            sendJson(exchange, 200, healthPayload());
-        } catch (IllegalArgumentException error) {
-            sendJson(exchange, 422, error(error.getMessage()));
-        } catch (IOException error) {
-            sendJson(exchange, 400, error("Request tidak valid."));
-        } finally {
-            exchange.close();
-        }
-    }
-
     private String healthPayload() {
         String status = config.configured() ? "ok" : "degraded";
         return "{\"status\":" + JsonUtil.quote(status)
                 + ",\"configured\":" + config.configured()
-                + ",\"readOnly\":true"
+                + ",\"readOnly\":false"
                 + ",\"target\":" + JsonUtil.quote(config.redactedTarget()) + "}";
     }
 
@@ -160,6 +143,39 @@ public final class ThriftQueryServer {
         } catch (ClassNotFoundException | SQLException error) {
             logDatabaseFailure(error);
             sendJson(exchange, 502, error(label + " tidak dapat dimuat. Periksa koneksi dan kredensial Hive JDBC."));
+        } finally {
+            exchange.close();
+        }
+    }
+
+    private void metadata(HttpExchange exchange, boolean columns) throws IOException {
+        if (!"GET".equals(exchange.getRequestMethod())) { methodNotAllowed(exchange); return; }
+        try {
+            Map<String, String> params = new HashMap<>();
+            String raw = exchange.getRequestURI().getRawQuery();
+            if (raw != null) for (String pair : raw.split("&")) {
+                String[] parts = pair.split("=", 2);
+                params.put(URLDecoder.decode(parts[0], StandardCharsets.UTF_8),
+                        parts.length == 2 ? URLDecoder.decode(parts[1], StandardCharsets.UTF_8) : "");
+            }
+            String namespace = params.get("namespace");
+            String payload = columns
+                    ? "{\"columns\":[" + jdbc.columns(namespace, params.get("table")).stream().map(JdbcService.Column::toJson).collect(Collectors.joining(",")) + "]}"
+                    : "{\"tables\":" + JsonUtil.stringArray(jdbc.tables(namespace)) + "}";
+            sendJson(exchange, 200, payload);
+        } catch (IllegalArgumentException error) {
+            sendJson(exchange, 422, error("Identifier wajib diisi, maksimal 256 karakter, tanpa karakter kontrol."));
+        } catch (IllegalStateException error) {
+            sendJson(exchange, 503, error("Koneksi database belum dikonfigurasi di server."));
+        } catch (SQLTimeoutException error) {
+            logDatabaseFailure(error);
+            sendJson(exchange, 504, error("Metadata melewati batas waktu. Coba refresh kembali."));
+        } catch (ClassNotFoundException error) {
+            logDatabaseFailure(error);
+            sendJson(exchange, 503, error("Hive JDBC driver tidak ditemukan di classpath Java."));
+        } catch (SQLException error) {
+            logDatabaseFailure(error);
+            sendJson(exchange, 502, error("Metadata tidak dapat dimuat. Periksa koneksi Hive JDBC lalu refresh."));
         } finally {
             exchange.close();
         }

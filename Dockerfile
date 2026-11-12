@@ -19,7 +19,7 @@ FROM eclipse-temurin:17-jre-jammy AS runtime
 ENV HOST=0.0.0.0 \
     PORT=4173 \
     QUERY_TIMEOUT_MS=30000 \
-    MAX_QUERY_ROWS=1000 \
+    DEFAULT_QUERY_LIMIT=50 \
     SPARK_HOME=/opt/spark \
     PATH=/opt/spark/bin:/opt/spark/sbin:$PATH \
     LANG=C.UTF-8 \
