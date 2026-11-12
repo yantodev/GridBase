@@ -16,15 +16,17 @@ public final class AppConfig {
     public final int timeoutSeconds;
     public final int defaultQueryLimit;
     public final Path publicDir;
+    public final DatabaseType databaseType;
 
     private final String jdbcUrl;
     private final String username;
     private final String password;
 
-    private AppConfig(String host, int port, String jdbcUrl, String username, String password,
+    private AppConfig(String host, int port, DatabaseType databaseType, String jdbcUrl, String username, String password,
                       int timeoutSeconds, int defaultQueryLimit, Path publicDir) {
         this.host = host;
         this.port = port;
+        this.databaseType = databaseType;
         this.jdbcUrl = jdbcUrl;
         this.username = username;
         this.password = password;
@@ -39,10 +41,15 @@ public final class AppConfig {
 
     static AppConfig load(Path projectRoot, Map<String, String> environment) {
         Map<String, String> fileValues = readDotEnv(projectRoot.resolve(".env"));
+        String jdbcUrl = value("THRIFT_JDBC_URL", environment, fileValues, "").trim();
+        String typeValue = value("DATABASE_TYPE", environment, fileValues,
+                value("DB_TYPE", environment, fileValues, ""));
+        DatabaseType databaseType = typeValue.isBlank() ? DatabaseType.infer(jdbcUrl) : DatabaseType.parse(typeValue);
         AppConfig config = new AppConfig(
                 value("HOST", environment, fileValues, "127.0.0.1"),
                 boundedInt(value("PORT", environment, fileValues, "4173"), 1, 65535, 4173),
-                value("THRIFT_JDBC_URL", environment, fileValues, "").trim(),
+                databaseType,
+                jdbcUrl,
                 value("THRIFT_USERNAME", environment, fileValues, "").trim(),
                 value("THRIFT_PASSWORD", environment, fileValues, ""),
                 boundedInt(value("QUERY_TIMEOUT_MS", environment, fileValues, "30000"), 1000, 120000, 30000) / 1000,
@@ -53,9 +60,8 @@ public final class AppConfig {
             requireValue(config.jdbcUrl, "JDBC URL", MAX_JDBC_URL_LENGTH);
             requireValue(config.username, "username", MAX_USERNAME_LENGTH);
             requireValue(config.password, "password", MAX_PASSWORD_LENGTH);
-            if (!config.jdbcUrl.startsWith("jdbc:hive2://")) {
-                throw new IllegalArgumentException("JDBC URL harus menggunakan jdbc:hive2://.");
-            }
+            if (config.databaseType == null) throw new IllegalArgumentException("Tipe database tidak dapat ditentukan dari JDBC URL.");
+            config.databaseType.validateUrl(config.jdbcUrl);
         }
         return config;
     }
@@ -74,6 +80,10 @@ public final class AppConfig {
 
     public String password() {
         return password;
+    }
+
+    public ConnectionProfile connectionProfile() {
+        return ConnectionProfile.fromEnvironment(databaseType, jdbcUrl, username, password);
     }
 
     public String redactedTarget() {

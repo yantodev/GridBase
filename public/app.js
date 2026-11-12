@@ -3,6 +3,7 @@ const C = window.WorkbenchCore;
 const $ = selector => document.querySelector(selector);
 const HISTORY_STORAGE_KEY = 'thrift-query-workbench:history:v1';
 const DRAFT_STORAGE_KEY = 'thrift-query-workbench:drafts:v1';
+const CONNECTIONS_STORAGE_KEY = 'gridbase:connections:v1';
 const RESULTS_PAGE_SIZE = 10;
 const MAX_HISTORY_ITEMS = 5;
 function readStorage(key) { try { return window.localStorage.getItem(key); } catch { return null; } }
@@ -13,8 +14,19 @@ function loadHistory() {
 function saveHistory() {
   try { window.localStorage.setItem(HISTORY_STORAGE_KEY, JSON.stringify(state.history)); } catch { setToast('History could not be saved in this browser.'); }
 }
+function loadConnections() {
+  try {
+    const data = JSON.parse(readStorage(CONNECTIONS_STORAGE_KEY) || '[]');
+    return Array.isArray(data) ? data.filter(item => item && typeof item.name === 'string' && typeof item.type === 'string').slice(0, 20) : [];
+  } catch { return []; }
+}
+function saveConnections() {
+  try { window.localStorage.setItem(CONNECTIONS_STORAGE_KEY, JSON.stringify(state.connectionProfiles)); }
+  catch { setToast('Daftar koneksi tidak dapat disimpan di browser.'); }
+}
 const state = {
-  ...C.restoreDrafts(readStorage(DRAFT_STORAGE_KEY)), history: loadHistory(), configured: false,
+  ...C.restoreDrafts(readStorage(DRAFT_STORAGE_KEY)), history: loadHistory(), connectionProfiles: loadConnections(), configured: false,
+  databaseType: 'hive', catalogName: 's3tables', connectionName: '',
   sidebarOpen: !window.matchMedia('(max-width: 700px)').matches, tool: 'database',
   schemas: [], schemaEntries: new Map(), columns: new Map(), metadataLoading: false, metadataError: '',
 };
@@ -59,6 +71,104 @@ async function api(url, options = {}) {
   try { data = await response.json(); } catch { throw new Error('Respons server tidak valid. Periksa log server lalu coba kembali.'); }
   if (!response.ok) throw new Error(data.error || 'Request gagal. Coba kembali.');
   return data;
+}
+function connectionType() { return $('#database-type').value; }
+function updateConnectionType() {
+  const type = connectionType(), hive = type === 'hive';
+  $('#connection-jdbc-wrap').hidden = !hive;
+  for (const id of ['connection-host', 'connection-port']) {
+    $('#' + id).disabled = hive;
+    $('#' + id).required = !hive;
+  }
+  $('#connection-database').placeholder = hive ? 'default' : type === 'mysql' ? 'app_db' : 'postgres';
+  $('#connection-port').placeholder = type === 'mysql' ? '3306' : type === 'postgresql' ? '5432' : '10000';
+  if (!$('#connection-port').value) $('#connection-port').value = type === 'mysql' ? '3306' : type === 'postgresql' ? '5432' : '10000';
+  if (!$('#connection-database').value) $('#connection-database').value = type === 'hive' ? 'default' : type === 'mysql' ? 'mysql' : 'postgres';
+}
+function resetConnectionForm() {
+  $('#connection-name').value = '';
+  $('#database-type').value = 'postgresql';
+  $('#connection-host').value = '127.0.0.1';
+  $('#connection-port').value = '5432';
+  $('#connection-database').value = 'postgres';
+  $('#connection-jdbc-url').value = '';
+  $('#connection-username').value = '';
+  $('#connection-password').value = '';
+  $('#connection-ssl').checked = false;
+  $('#connection-form-status').textContent = '';
+  updateConnectionType();
+  $('#connection-name').focus();
+}
+function loadConnectionForm(profile) {
+  $('#connection-name').value = profile.name || '';
+  $('#database-type').value = profile.type || 'postgresql';
+  $('#connection-host').value = profile.host || '';
+  $('#connection-port').value = profile.port || '';
+  $('#connection-database').value = profile.database || '';
+  $('#connection-jdbc-url').value = profile.jdbcUrl || '';
+  $('#connection-username').value = profile.username || '';
+  $('#connection-password').value = '';
+  $('#connection-ssl').checked = Boolean(profile.ssl);
+  $('#connection-form-status').textContent = 'Masukkan password untuk menguji atau menghubungkan.';
+  updateConnectionType();
+  $('#connection-password').focus();
+}
+function connectionPayload() {
+  const type = connectionType();
+  return {
+    type,
+    name: $('#connection-name').value.trim(),
+    host: $('#connection-host').value.trim(),
+    port: $('#connection-port').value.trim(),
+    database: $('#connection-database').value.trim(),
+    jdbcUrl: type === 'hive' ? $('#connection-jdbc-url').value.trim() : '',
+    username: $('#connection-username').value,
+    password: $('#connection-password').value,
+    ssl: $('#connection-ssl').checked,
+  };
+}
+function saveConnectionPayload(payload) {
+  const safe = {
+    name: payload.name, type: payload.type, host: payload.host, port: payload.port,
+    database: payload.database, jdbcUrl: payload.jdbcUrl, username: payload.username, ssl: payload.ssl,
+  };
+  const index = state.connectionProfiles.findIndex(item => item.name === safe.name);
+  if (index < 0) state.connectionProfiles.unshift(safe);
+  else state.connectionProfiles[index] = safe;
+  state.connectionProfiles = state.connectionProfiles.slice(0, 20);
+  saveConnections(); renderSavedConnections();
+}
+function renderSavedConnections() {
+  const root = $('#saved-connection-list'); root.replaceChildren();
+  if (!state.connectionProfiles.length) { root.append(element('p', 'pane-note', 'Belum ada koneksi tersimpan.')); return; }
+  state.connectionProfiles.forEach(profile => {
+    const row = element('div', 'saved-connection');
+    const load = button('', 'saved-connection-main', () => loadConnectionForm(profile));
+    load.append(icon('database'), element('span', '', profile.name), element('small', '', profile.type === 'postgresql' ? 'PostgreSQL' : profile.type === 'mysql' ? 'MySQL' : 'Spark Thrift / Hive'));
+    const remove = button('×', 'saved-connection-remove', () => {
+      state.connectionProfiles = state.connectionProfiles.filter(item => item !== profile); saveConnections(); renderSavedConnections();
+    });
+    remove.title = 'Remove saved connection'; remove.setAttribute('aria-label', 'Remove ' + profile.name); row.append(load, remove); root.append(row);
+  });
+}
+function openConnectionManager() { renderSavedConnections(); resetConnectionForm(); $('#connection-dialog').showModal(); }
+async function requestConnection(path) {
+  const payload = connectionPayload();
+  if (!payload.name || !payload.username || !payload.password || (payload.type === 'hive' && !payload.jdbcUrl)) {
+    $('#connection-form-status').textContent = 'Isi nama, username, password, dan detail koneksi terlebih dahulu.'; return null;
+  }
+  const testButton = $('#test-connection'), connectButton = $('#connect-connection');
+  testButton.disabled = true; connectButton.disabled = true; $('#connection-form-status').textContent = path.endsWith('/test') ? 'Testing connection…' : 'Connecting…';
+  try {
+    const result = await api(path, {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(payload)});
+    $('#connection-form-status').textContent = path.endsWith('/test') ? 'Connection successful.' : 'Connected.';
+    if (path.endsWith('/connect')) {
+      saveConnectionPayload(payload); $('#connection-dialog').close(); await checkConnection(); setToast('Connected to ' + payload.name + '.');
+    }
+    return result;
+  } catch (error) {
+    $('#connection-form-status').textContent = error.message; return null;
+  } finally { testButton.disabled = false; connectButton.disabled = false; }
 }
 function updateEditor() {
   const sql = editor.value;
@@ -120,7 +230,7 @@ function switchTab(id) {
   editor.setSelectionRange(tab.selectionStart || 0, tab.selectionEnd || 0);
   editor.scrollTop = tab.scrollTop || 0; editor.scrollLeft = tab.scrollLeft || 0;
   $('#completion-panel').hidden = true;
-  $('#console-context').textContent = tab.source ? 's3tables / ' + tab.source.namespace + ' / ' + tab.source.table : 'Spark SQL';
+  $('#console-context').textContent = tab.source ? state.catalogName + ' / ' + tab.source.namespace + ' / ' + tab.source.table : (state.databaseType === 'hive' ? 'Spark SQL' : state.databaseType);
   $('#console-context').title = $('#console-context').textContent;
   updateEditor(); renderTabs(); renderResults(); updateRunButton(); persistDrafts();
 }
@@ -155,14 +265,18 @@ async function checkConnection() {
   $('#retry-connection').disabled = true;
   try {
     const health = await api('/api/health'); state.configured = Boolean(health.configured);
+    state.databaseType = health.databaseType || 'hive'; state.connectionName = health.connectionName || '';
+    state.catalogName = state.databaseType === 'hive' ? 's3tables' : (health.connectionName || (state.databaseType === 'mysql' ? 'MySQL' : 'PostgreSQL'));
+    $('#catalog-name').textContent = state.catalogName;
+    $('#project-name').textContent = state.catalogName;
     $('#connection-status').className = 'connection-status' + (state.configured ? ' is-configured' : ' is-error');
     $('#connection-label').textContent = state.configured ? 'Configured' : 'Not configured';
-    $('#connection-status').title = health.target || 'Spark Thrift Server';
+    $('#connection-status').title = health.connectionName ? `${health.connectionName} · ${health.target || ''}` : (health.target || 'Database connection');
     $('#connection-notice').hidden = state.configured;
-    $('#connection-notice').textContent = 'Koneksi belum dikonfigurasi. Isi THRIFT_JDBC_URL, THRIFT_USERNAME dan THRIFT_PASSWORD di .env, lalu restart server.';
-    $('#server-state').textContent = state.configured ? 'Read / write' : 'Missing configuration';
+    $('#connection-notice').textContent = 'Belum ada koneksi database. Klik ikon pengaturan di kanan atas untuk menambahkan koneksi PostgreSQL, MySQL, atau Spark Thrift / Hive.';
+    $('#server-state').textContent = state.configured ? (health.databaseType || 'Database') + ' · Read / write' : 'Missing connection';
     if (state.configured) await refreshMetadata();
-    else { state.metadataError = 'Lengkapi koneksi di .env lalu restart server dan periksa kembali.'; state.metadataLoading = false; renderExplorer(); }
+    else { state.metadataError = 'Tambahkan koneksi melalui Connection manager.'; state.metadataLoading = false; renderExplorer(); }
   } catch (error) {
     state.configured = false; state.metadataLoading = false; state.metadataError = error.message;
     $('#connection-status').className = 'connection-status is-error'; $('#connection-label').textContent = 'Offline';
@@ -274,13 +388,13 @@ function renderExplorer() {
       list.append(item);
     });
     root.append(list);
-    if (!list.children.length) root.append(element('p','pane-note',search ? 'No matching loaded objects. Expand schemas to load their tables.' : 'No schemas found in s3tables.'));
+    if (!list.children.length) root.append(element('p','pane-note',search ? 'No matching loaded objects. Expand schemas to load their tables.' : 'No schemas found in this database.'));
   });
 }
 function openTable(namespace, table) {
   const existing = state.tabs.find(tab => tab.source?.namespace === namespace && tab.source?.table === table);
   if (existing) { switchTab(existing.id); editor.focus(); }
-  else { const tab = addConsole(C.tableSql(namespace, table), table, {namespace,table}); if(tab)runQuery(tab.sql); }
+  else { const sql = state.databaseType === 'hive' ? C.tableSql(namespace, table) : C.tableSql(namespace, table, state.databaseType); const tab = addConsole(sql, table, {namespace,table}); if(tab)runQuery(tab.sql); }
   if (window.matchMedia('(max-width: 700px)').matches) setSidebar(state.tool,false);
 }
 function renderHistory() {
@@ -403,9 +517,9 @@ function indentEditor(outdent) {
 function showCompletion() {
   const before=editor.value.slice(0,editor.selectionStart),qualifiedPrefix=before.match(/[\w$.]*$/)[0],prefix=qualifiedPrefix.split('.').at(-1);
   const options=new Map(qualifiedPrefix.includes('.')?[]:[...C.KEYWORDS].map(word=>[word,{label:word,value:word,qualified:false}]));
-  for(const namespace of state.schemas)options.set(namespace,{label:namespace,value:C.quoteIdentifier(namespace),qualified:false});
-  for(const [namespace,entry] of state.schemaEntries)for(const table of entry.tables || [])options.set(namespace+'.'+table,{label:namespace+'.'+table,value:C.quoteIdentifier('s3tables')+'.'+C.quoteIdentifier(namespace)+'.'+C.quoteIdentifier(table),qualified:true});
-  for(const entry of state.columns.values())for(const column of entry.items || [])options.set(column.name,{label:column.name,value:C.quoteIdentifier(column.name),qualified:false});
+  for(const namespace of state.schemas)options.set(namespace,{label:namespace,value:C.quoteIdentifier(namespace,state.databaseType),qualified:false});
+  for(const [namespace,entry] of state.schemaEntries)for(const table of entry.tables || [])options.set(namespace+'.'+table,{label:namespace+'.'+table,value:C.qualifiedTable(namespace,table,state.databaseType),qualified:true});
+  for(const entry of state.columns.values())for(const column of entry.items || [])options.set(column.name,{label:column.name,value:C.quoteIdentifier(column.name,state.databaseType),qualified:false});
   const list=[...options.values()].filter(item=>item.label.toLowerCase().split('.').some(part=>part.startsWith(prefix.toLowerCase()))).slice(0,80);
   if(!list.length){setToast('No matching SQL or loaded objects.');return;}
   completionRange={start:editor.selectionStart-prefix.length,qualifiedStart:editor.selectionStart-qualifiedPrefix.length,end:editor.selectionEnd};
@@ -463,6 +577,13 @@ $('#sidebar-backdrop').addEventListener('click',()=>{setSidebar(state.tool,false
 $('#object-filter').addEventListener('input',renderExplorer);
 $('#refresh-metadata').addEventListener('click',refreshMetadata);
 $('#retry-connection').addEventListener('click',checkConnection);
+$('#manage-connections').addEventListener('click',openConnectionManager);
+$('#close-connection').addEventListener('click',()=>$('#connection-dialog').close());
+$('#cancel-connection').addEventListener('click',()=>$('#connection-dialog').close());
+$('#new-connection').addEventListener('click',resetConnectionForm);
+$('#database-type').addEventListener('change',updateConnectionType);
+$('#test-connection').addEventListener('click',()=>requestConnection('/api/connections/test'));
+$('#connection-form').addEventListener('submit',event=>{event.preventDefault();requestConnection('/api/connections/connect');});
 $('#clear-history').addEventListener('click',()=>{state.history=[];saveHistory();renderHistory();});
 for(const view of ['results','output']) {
   $('#'+view+'-tab').addEventListener('click',()=>setDock(view));
@@ -477,4 +598,4 @@ window.addEventListener('beforeunload',()=>{rememberEditor();persistDrafts();});
 document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='hidden'){rememberEditor();persistDrafts();}});
 document.addEventListener('keydown',event=>{if(event.key==='Escape'&&state.sidebarOpen&&window.matchMedia('(max-width: 700px)').matches){setSidebar(state.tool,false);$('#'+state.tool+'-tool').focus();}});
 window.matchMedia('(max-width: 700px)').addEventListener('change',event=>{if(event.matches)setSidebar(state.tool,false);else setSidebar(state.tool,state.sidebarOpen);});
-editor.value=active().sql;switchTab(state.activeId);renderHistory();setSidebar();checkConnection();
+editor.value=active().sql;switchTab(state.activeId);renderHistory();setSidebar();updateConnectionType();checkConnection();

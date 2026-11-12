@@ -9,9 +9,9 @@
   <img alt="HTML/CSS" src="https://img.shields.io/badge/HTML%2FCSS-E34F26?logo=html5&logoColor=white" />
 </p>
 
-GUI lokal untuk membaca, membuat, memperbarui, dan menghapus data di Spark Thrift Server melalui
-Hive JDBC langsung dari Java. Browser tidak menerima username atau password;
-semua koneksi berlangsung dari backend Java.
+GUI lokal untuk membaca, membuat, memperbarui, dan menghapus data melalui JDBC langsung dari Java.
+Connection manager bergaya DataGrip mendukung Spark Thrift / Hive, PostgreSQL, dan MySQL.
+Password dikirim hanya saat test/connect dan tidak disimpan di browser.
 
 ## Workspace bergaya DataGrip
 
@@ -23,11 +23,23 @@ Tema dark dengan alur inti yang mengacu pada [query consoles dan query output Da
 - **Results / Output:** hasil terikat ke console asal, termasuk saat berpindah tab selama query berjalan. Klik heading kolom untuk sort, gunakan filter untuk mencari baris yang sudah dikembalikan, lalu unduh seluruh hasil filter melalui CSV/JSON. Klik nomor baris atau klik dua kali pada baris untuk detail vertikal.
 - **Layout:** rail kiri membuka Database atau History. Geser pembatas explorer/editor atau fokuskan pembatas lalu gunakan tombol panah, Home, dan End. Pada layar kecil explorer tampil sebagai overlay yang dapat ditutup dengan Escape.
 
-Status `Configured` menandakan konfigurasi server lengkap; `Connected` baru muncul setelah metadata berhasil diambil. Kegagalan metadata menyediakan retry. SQL memakai nama tabel lengkap pada katalog `s3tables`; label console tidak mengubah session database di backend.
+Status `Configured` menandakan koneksi tersedia; `Connected` baru muncul setelah metadata berhasil diambil. Kegagalan metadata menyediakan retry. SQL memakai identifier sesuai dialect database aktif.
 
 Implementasi ini mempertahankan branding GridBase dan tidak memakai aset JetBrains. Pengeditan sel langsung serta pengelolaan transaksi belum termasuk; perubahan data dijalankan melalui SQL sesuai dukungan Spark dan izin akun.
 
 ## Konfigurasi koneksi
+
+Klik ikon pengaturan di title bar untuk membuka **Database connections**. Pilih PostgreSQL,
+MySQL, atau Spark Thrift / Hive, isi detail koneksi, lalu gunakan **Test connection** sebelum
+**Connect**. Profil yang disimpan hanya berisi detail non-secret; password harus diisi ulang
+setelah browser reload. Koneksi aktif disimpan di memori backend.
+
+Image Docker sudah membawa driver JDBC PostgreSQL dan MySQL. Untuk menjalankan lokal, letakkan
+driver tambahan di folder `drivers/` atau set `JDBC_DRIVER_DIR` ke folder yang berisi
+`postgresql-*.jar` dan `mysql-connector-j-*.jar`.
+
+Koneksi otomatis dari `.env` tetap didukung. Tambahkan `DATABASE_TYPE=postgresql` atau
+`DATABASE_TYPE=mysql` jika URL tidak cukup untuk mengenali jenis database.
 
 Salin contoh konfigurasi sebelum menjalankan aplikasi:
 
@@ -50,14 +62,13 @@ tidak disertakan dalam Docker image; Compose meneruskan nilainya saat container
 dijalankan. Setelah mengubah konfigurasi, restart server atau jalankan ulang
 `docker compose up -d`.
 
-UI langsung membuka workspace tanpa modal input kredensial. Jika konfigurasi
-belum lengkap, status koneksi menunjukkan `not configured` dan tombol query
-dinonaktifkan. Username dan password tidak disimpan di browser atau dikembalikan
-oleh endpoint health.
+Jika belum ada koneksi, status menunjukkan `Not configured` dan tombol query dinonaktifkan.
+Username dan password tidak dikembalikan oleh endpoint health.
 
 ## Menjalankan secara lokal
 
-Mode lokal membutuhkan instalasi Spark 3.5.6 yang memiliki Hive JDBC driver:
+Mode lokal membutuhkan instalasi Spark 3.5.6 yang memiliki Hive JDBC driver. PostgreSQL/MySQL
+membutuhkan driver JDBC tambahan seperti dijelaskan di atas:
 
 ```bash
 ls /home/buana/.local/opt/spark-3.5.6-bin-hadoop3/jars/hive-jdbc-2.3.9.jar
@@ -144,7 +155,10 @@ Konfigurasi Docker yang tersedia:
 Kontrak API tersedia di [`openapi.yaml`](./openapi.yaml):
 
 - `GET /api/health` — status konfigurasi tanpa mengembalikan secret.
-- `GET /api/databases` — daftar namespace dari katalog `s3tables` melalui `SHOW NAMESPACES IN s3tables`.
+- `POST /api/connections/test` — menguji detail JDBC tanpa mengaktifkannya.
+- `POST /api/connections/connect` — menguji dan mengaktifkan koneksi di memori backend.
+- `POST /api/connections/disconnect` — menghapus koneksi aktif.
+- `GET /api/databases` — daftar schema/database dari koneksi aktif.
 - `GET /api/tables?namespace=...` — daftar tabel pada namespace.
 - `GET /api/columns?namespace=...&table=...` — daftar kolom, tipe, dan komentar.
 - `GET /api/namespaces` — alias deprecated untuk klien lama; gunakan `/api/databases`.

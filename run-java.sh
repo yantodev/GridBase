@@ -4,6 +4,7 @@ set -euo pipefail
 PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 BUILD_DIR="$PROJECT_ROOT/build/java"
 SPARK_ROOT="${SPARK_HOME:-/home/buana/.local/opt/spark-3.5.6-bin-hadoop3}"
+JDBC_DRIVER_DIR="${JDBC_DRIVER_DIR:-$PROJECT_ROOT/drivers}"
 
 if [[ ! -d "$SPARK_ROOT/jars" ]]; then
   echo "Spark jars tidak ditemukan: $SPARK_ROOT/jars" >&2
@@ -16,6 +17,6 @@ mapfile -d '' JAVA_SOURCES < <(find "$PROJECT_ROOT/java-service/src" -type f -na
 javac --add-modules jdk.httpserver -d "$BUILD_DIR" "${JAVA_SOURCES[@]}"
 
 exec java --add-modules jdk.httpserver \
-  -cp "$BUILD_DIR:$SPARK_ROOT/jars/*" \
+  -cp "$BUILD_DIR:$SPARK_ROOT/jars/*:$JDBC_DRIVER_DIR/*" \
   com.peentar.thriftquery.ThriftQueryServer "$@"
 

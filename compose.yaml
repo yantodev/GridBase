@@ -15,4 +15,5 @@ services:
       THRIFT_PASSWORD: "${THRIFT_PASSWORD:-}"
       QUERY_TIMEOUT_MS: "${QUERY_TIMEOUT_MS:-30000}"
       DEFAULT_QUERY_LIMIT: "${DEFAULT_QUERY_LIMIT:-50}"
+      DATABASE_TYPE: "${DATABASE_TYPE:-}"
     restart: unless-stopped

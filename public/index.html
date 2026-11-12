@@ -24,13 +24,15 @@
     <symbol id="i-download" viewBox="0 0 20 20"><path d="M10 2v10m-4-4 4 4 4-4M3 13v4h14v-4"/></symbol>
     <symbol id="i-format" viewBox="0 0 20 20"><path d="M3 4h14M7 8h10M7 12h7M3 16h14M2 8l3 2-3 2"/></symbol>
     <symbol id="i-edit" viewBox="0 0 20 20"><path d="m3 13 10-10 4 4L7 17H3Zm8-8 4 4"/></symbol>
+    <symbol id="i-settings" viewBox="0 0 20 20"><path d="M8 2h4l.7 2.1 2 .9 2-.8 2.1 2.1-.8 2 1 2 .9.7v4l-2.1.7-1 2-2-.8-2 .9H8l-.7-2.1-2-.9-2 .8-2.1-2.1.8-2-1-2-.9-.7v-4l2.1-.7 1-2 2 .8 2-.9Z"/><circle cx="10" cy="10" r="2.5"/></symbol>
   </defs></svg>
   <a class="skip-link" href="#sql-editor">Skip to SQL editor</a>
   <div id="app" class="ide-shell">
     <header class="titlebar">
       <svg class="product-icon" aria-hidden="true"><use href="#i-database"/></svg>
-      <h1>GridBase</h1><span class="title-divider"></span><span class="project-name">s3tables</span>
+      <h1>GridBase</h1><span class="title-divider"></span><span id="project-name" class="project-name">s3tables</span>
       <span id="connection-status" class="connection-status" role="status"><span class="status-dot"></span><span id="connection-label">Checking server…</span></span>
+      <button id="manage-connections" class="icon-button" type="button" title="Manage database connections" aria-label="Manage database connections"><svg><use href="#i-settings"/></svg></button>
       <button id="retry-connection" class="icon-button" type="button" title="Check connection" aria-label="Check connection"><svg><use href="#i-refresh"/></svg></button>
     </header>
     <nav class="tool-rail" aria-label="Tool windows">
@@ -42,7 +44,7 @@
       <header class="pane-heading"><h2 id="sidebar-heading">Database</h2><div class="button-group"><button id="refresh-metadata" class="icon-button" type="button" title="Refresh metadata" aria-label="Refresh metadata"><svg><use href="#i-refresh"/></svg></button><button id="hide-sidebar" class="icon-button" type="button" title="Hide tool window" aria-label="Hide tool window"><svg><use href="#i-panel"/></svg></button></div></header>
       <div id="database-view" class="sidebar-view">
         <label class="search-field"><svg aria-hidden="true"><use href="#i-search"/></svg><input id="object-filter" type="search" placeholder="Filter loaded objects" aria-label="Filter loaded database objects" autocomplete="off" /></label>
-        <div class="catalog-root"><svg aria-hidden="true"><use href="#i-database"/></svg><strong>s3tables</strong><span id="schema-count"></span></div>
+        <div class="catalog-root"><svg aria-hidden="true"><use href="#i-database"/></svg><strong id="catalog-name">Database</strong><span id="schema-count"></span></div>
         <nav id="schema-list" class="schema-list" aria-label="Database objects" aria-busy="true"><p class="pane-note">Loading schemas…</p></nav>
       </div>
       <div id="history-view" class="sidebar-view" hidden><div class="history-heading"><span>Recent executions · <span id="history-count">0</span>/5</span><button id="clear-history" class="text-button" type="button">Clear</button></div><div id="history-list" class="history-list"></div></div>
@@ -82,6 +84,26 @@
     </main>
     <footer class="statusbar"><span id="toast" role="status" aria-live="polite">Ready</span><span class="statusbar-right"><span id="server-state">Server configuration</span><span>UTF-8</span><span>SQL</span></span></footer>
   </div>
+  <dialog id="connection-dialog" class="workbench-dialog connection-dialog" aria-labelledby="connection-heading">
+    <form id="connection-form">
+      <header class="dialog-heading"><div><h2 id="connection-heading">Database connections</h2><p class="dialog-subtitle">Connect seperti DataGrip. Password hanya dikirim saat test/connect dan tidak disimpan di browser.</p></div><button id="close-connection" class="icon-button" type="button" aria-label="Close connection manager"><svg><use href="#i-close"/></svg></button></header>
+      <div class="connection-layout">
+        <aside class="saved-connections"><div class="saved-heading"><span>Saved connections</span><button id="new-connection" class="text-button" type="button">New</button></div><div id="saved-connection-list"></div></aside>
+        <div class="connection-fields">
+          <label for="connection-name">Name</label><input id="connection-name" maxlength="80" required autocomplete="off" placeholder="Local PostgreSQL" />
+          <label for="database-type">Database</label><select id="database-type"><option value="postgresql">PostgreSQL</option><option value="mysql">MySQL</option><option value="hive">Spark Thrift / Hive</option></select>
+          <div class="field-grid"><div><label for="connection-host">Host</label><input id="connection-host" required autocomplete="off" placeholder="127.0.0.1" /></div><div><label for="connection-port">Port</label><input id="connection-port" inputmode="numeric" required autocomplete="off" placeholder="5432" /></div></div>
+          <label for="connection-database">Database / schema</label><input id="connection-database" required autocomplete="off" placeholder="postgres" />
+          <div id="connection-jdbc-wrap" hidden><label for="connection-jdbc-url">JDBC URL</label><input id="connection-jdbc-url" autocomplete="off" placeholder="jdbc:hive2://spark.example:443/default;transportMode=http" /></div>
+          <label for="connection-username">Username</label><input id="connection-username" required autocomplete="username" />
+          <label for="connection-password">Password</label><input id="connection-password" type="password" autocomplete="current-password" placeholder="Password tidak disimpan" />
+          <label class="checkbox-field"><input id="connection-ssl" type="checkbox" /> Use SSL</label>
+          <p id="connection-form-status" class="form-status" role="status" aria-live="polite"></p>
+        </div>
+      </div>
+      <div class="dialog-actions"><button id="test-connection" class="tool-button" type="button">Test connection</button><button id="cancel-connection" class="tool-button" type="button">Cancel</button><button id="connect-connection" class="primary-button" type="submit">Connect</button></div>
+    </form>
+  </dialog>
   <dialog id="rename-dialog" class="workbench-dialog" aria-labelledby="rename-heading"><form id="rename-form"><h2 id="rename-heading">Rename console</h2><label for="console-name">Console name</label><input id="console-name" maxlength="80" required autocomplete="off" /><div class="dialog-actions"><button id="cancel-rename" class="tool-button" type="button">Cancel</button><button class="primary-button" type="submit">Save</button></div></form></dialog>
   <dialog id="row-detail" class="workbench-dialog row-detail" aria-labelledby="row-detail-heading"><header class="pane-heading"><h2 id="row-detail-heading">Row detail</h2><button id="close-row-detail" class="icon-button" type="button" aria-label="Close row detail"><svg><use href="#i-close"/></svg></button></header><div id="row-detail-table-wrap" class="row-detail-table-wrap"></div></dialog>
   <script src="/workbench-core.js" defer></script>

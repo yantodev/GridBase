@@ -1,7 +1,7 @@
 package com.peentar.thriftquery;
 
 import java.sql.Connection;
-import java.sql.DriverManager;
+import java.sql.DatabaseMetaData;
 import java.sql.ResultSet;
 import java.sql.ResultSetMetaData;
 import java.sql.SQLException;
@@ -12,22 +12,49 @@ import java.util.List;
 import java.util.Set;
 
 public final class JdbcService {
-    private static final String HIVE_DRIVER = "org.apache.hive.jdbc.HiveDriver";
     static final String DATABASE_LIST_SQL = "SHOW NAMESPACES IN s3tables";
     static final int METADATA_LIMIT = 10_000;
     private final AppConfig config;
     private final ConnectionFactory connections;
+    private volatile ConnectionProfile profile;
 
     public JdbcService(AppConfig config) {
-        this(config, () -> {
-            Class.forName(HIVE_DRIVER);
-            return DriverManager.getConnection(config.jdbcUrl(), config.username(), config.password());
-        });
+        this(config, null);
     }
 
     JdbcService(AppConfig config, ConnectionFactory connections) {
         this.config = config;
-        this.connections = connections;
+        this.profile = config.connectionProfile();
+        this.connections = connections != null ? connections : () -> {
+            ConnectionProfile active = profile;
+            if (active == null) throw new IllegalStateException("Database connection is not configured");
+            return active.open();
+        };
+    }
+
+    public boolean configured() {
+        return profile != null;
+    }
+
+    public ConnectionProfile profile() {
+        return profile;
+    }
+
+    public void connect(ConnectionProfile candidate) throws SQLException, ClassNotFoundException {
+        testConnection(candidate);
+        profile = candidate;
+    }
+
+    public void disconnect() {
+        profile = null;
+    }
+
+    public void testConnection(ConnectionProfile candidate) throws SQLException, ClassNotFoundException {
+        try (Connection connection = candidate.open()) {
+            if (!connection.isValid(Math.max(1, config.timeoutSeconds))) {
+                throw new SQLException("Database menolak koneksi.");
+            }
+        }
     }
 
     @FunctionalInterface
@@ -41,7 +68,7 @@ public final class JdbcService {
     }
 
     private QueryResult query(String sql, int rowLimit) throws SQLException, ClassNotFoundException {
-        if (!config.configured()) throw new IllegalStateException("Database connection is not configured");
+        if (!configured()) throw new IllegalStateException("Database connection is not configured");
         long startedAt = System.currentTimeMillis();
 
         try (Connection connection = connections.open();
@@ -77,6 +104,8 @@ public final class JdbcService {
     }
 
     public List<String> databases() throws SQLException, ClassNotFoundException {
+        if (!configured()) throw new IllegalStateException("Database connection is not configured");
+        if (!profile.type().isHive()) return jdbcSchemas();
         QueryResult result = query(DATABASE_LIST_SQL, METADATA_LIMIT);
         int databaseColumn = findDatabaseColumn(result.columns());
         List<String> databases = new ArrayList<>();
@@ -97,6 +126,8 @@ public final class JdbcService {
     }
 
     public List<String> tables(String namespace) throws SQLException, ClassNotFoundException {
+        if (!configured()) throw new IllegalStateException("Database connection is not configured");
+        if (!profile.type().isHive()) return jdbcTables(namespace);
         QueryResult result = query("SHOW TABLES IN `s3tables`." + quoteIdentifier(namespace), METADATA_LIMIT);
         int column = result.columns().size() > 1 ? 1 : 0;
         for (int i = 0; i < result.columns().size(); i++) {
@@ -113,6 +144,8 @@ public final class JdbcService {
     }
 
     public List<Column> columns(String namespace, String table) throws SQLException, ClassNotFoundException {
+        if (!configured()) throw new IllegalStateException("Database connection is not configured");
+        if (!profile.type().isHive()) return jdbcColumns(namespace, table);
         QueryResult result = query("DESCRIBE `s3tables`." + quoteIdentifier(namespace) + "." + quoteIdentifier(table), METADATA_LIMIT);
         List<Column> columns = new ArrayList<>();
         Set<String> seen = new HashSet<>();
@@ -133,6 +166,66 @@ public final class JdbcService {
             return "{\"name\":" + JsonUtil.quote(name) + ",\"type\":" + JsonUtil.quote(type)
                     + ",\"comment\":" + JsonUtil.quote(comment) + "}";
         }
+    }
+
+    private List<String> jdbcSchemas() throws SQLException, ClassNotFoundException {
+        try (Connection connection = connections.open()) {
+            DatabaseMetaData metadata = connection.getMetaData();
+            List<String> values = new ArrayList<>();
+            Set<String> seen = new HashSet<>();
+            if (profile.type() == DatabaseType.MYSQL) {
+                try (ResultSet result = metadata.getCatalogs()) {
+                    while (result.next()) addUnique(values, seen, result.getString("TABLE_CAT"));
+                }
+            } else {
+                try (ResultSet result = metadata.getSchemas()) {
+                    while (result.next()) addUnique(values, seen, result.getString("TABLE_SCHEM"));
+                }
+            }
+            return values;
+        }
+    }
+
+    private List<String> jdbcTables(String namespace) throws SQLException, ClassNotFoundException {
+        quoteIdentifier(namespace);
+        try (Connection connection = connections.open()) {
+            DatabaseMetaData metadata = connection.getMetaData();
+            String catalog = profile.type() == DatabaseType.MYSQL ? namespace : connection.getCatalog();
+            String schema = profile.type() == DatabaseType.MYSQL ? null : namespace;
+            List<String> tables = new ArrayList<>();
+            Set<String> seen = new HashSet<>();
+            try (ResultSet result = metadata.getTables(catalog, schema, "%", new String[]{"TABLE", "VIEW", "SYSTEM TABLE"})) {
+                while (result.next()) addUnique(tables, seen, result.getString("TABLE_NAME"));
+            }
+            return tables;
+        }
+    }
+
+    private List<Column> jdbcColumns(String namespace, String table) throws SQLException, ClassNotFoundException {
+        quoteIdentifier(namespace);
+        quoteIdentifier(table);
+        try (Connection connection = connections.open()) {
+            DatabaseMetaData metadata = connection.getMetaData();
+            String catalog = profile.type() == DatabaseType.MYSQL ? namespace : connection.getCatalog();
+            String schema = profile.type() == DatabaseType.MYSQL ? null : namespace;
+            List<Column> columns = new ArrayList<>();
+            Set<String> seen = new HashSet<>();
+            try (ResultSet result = metadata.getColumns(catalog, schema, table, "%")) {
+                while (result.next()) {
+                    String name = result.getString("COLUMN_NAME");
+                    if (name != null && seen.add(name)) {
+                        String type = result.getString("TYPE_NAME");
+                        String comment = result.getString("REMARKS");
+                        columns.add(new Column(name, type == null ? "" : type, comment == null ? "" : comment));
+                    }
+                }
+            }
+            return columns;
+        }
+    }
+
+    private static void addUnique(List<String> values, Set<String> seen, String value) {
+        if (value != null && !value.isBlank() && seen.add(value)) values.add(value);
     }
 
     @Deprecated

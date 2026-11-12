@@ -2,7 +2,7 @@ openapi: 3.0.3
 info:
   title: GridBase API
   version: 0.2.0
-  description: Local API for querying and changing data through Java Hive JDBC. Connection credentials are loaded from the server's .env or process environment at startup. Explicit outer SQL LIMIT controls returned result size. Missing LIMIT or LIMIT NULL defaults to 50 returned rows (DEFAULT_QUERY_LIMIT). Browser pagination remains 10 rows. This default does not limit affected rows for write statements.
+  description: Local API for querying and changing data through Java JDBC. Connections can be loaded from .env or switched at runtime through the connection manager. Supported databases are Spark Thrift/Hive, PostgreSQL, and MySQL.
 servers:
   - url: http://localhost:4173
 paths:
@@ -16,9 +16,42 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HealthResponse'
+  /api/connections/test:
+    post:
+      summary: Test a JDBC connection without activating it
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ConnectionRequest'
+      responses:
+        '200': { description: Connection succeeded }
+        '400': { description: Invalid connection details }
+        '502': { description: Database rejected the connection }
+        '503': { description: JDBC driver unavailable }
+  /api/connections/connect:
+    post:
+      summary: Test and activate a JDBC connection in server memory
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ConnectionRequest'
+      responses:
+        '200': { description: Connection activated }
+        '400': { description: Invalid connection details }
+        '502': { description: Database rejected the connection }
+        '503': { description: JDBC driver unavailable }
+  /api/connections/disconnect:
+    post:
+      summary: Remove the active connection
+      responses:
+        '200': { description: Disconnected }
   /api/query:
     post:
-      summary: Execute a SQL statement through Java Hive JDBC
+      summary: Execute a SQL statement through the active Java JDBC connection
       description: Accepts one SELECT, WITH, SHOW, DESCRIBE, EXPLAIN, CREATE, INSERT, UPDATE, DELETE, MERGE, ALTER, DROP, or TRUNCATE statement. Successful statements without a result set return empty columns and rows, with updateCount when the driver reports an affected-row count.
       requestBody:
         required: true
@@ -38,15 +71,15 @@ paths:
         '422':
           description: Unsupported SQL or more than one statement
         '502':
-          description: Hive JDBC rejected the SQL or could not execute it
+          description: The active JDBC driver rejected the SQL or could not execute it
         '503':
-          description: Connection credentials or Hive JDBC driver are unavailable
+          description: Connection credentials or JDBC driver are unavailable
         '504':
           description: Query timed out
   /api/databases:
     get:
-      summary: List databases available to the configured Spark session
-      description: Runs the fixed read-only SHOW NAMESPACES IN s3tables statement through Java Hive JDBC and returns the namespaces as database entries for the sidebar.
+      summary: List databases or schemas available to the active connection
+      description: Uses Spark metadata SQL for Hive and DatabaseMetaData for PostgreSQL/MySQL.
       responses:
         '200':
           description: Available databases
@@ -55,14 +88,14 @@ paths:
               schema:
                 $ref: '#/components/schemas/DatabasesResponse'
         '502':
-          description: Hive JDBC or Thrift Server error
+          description: JDBC or database server error
         '503':
-          description: Hive JDBC is not configured or the driver is unavailable
+          description: The connection or JDBC driver is unavailable
         '504':
           description: Database lookup timed out
   /api/tables:
     get:
-      summary: List tables in an s3tables namespace
+      summary: List tables in a database or schema
       description: Metadata uses a separate 10000-row ceiling, independent of DEFAULT_QUERY_LIMIT.
       parameters:
         - $ref: '#/components/parameters/Namespace'
@@ -181,6 +214,21 @@ components:
         configured: { type: boolean }
         readOnly: { type: boolean, enum: [false] }
         target: { type: string, nullable: true }
+        databaseType: { type: string, nullable: true, enum: [hive, postgresql, mysql] }
+        connectionName: { type: string, nullable: true }
+    ConnectionRequest:
+      type: object
+      required: [type, username, password]
+      properties:
+        type: { type: string, enum: [hive, postgresql, mysql] }
+        name: { type: string, maxLength: 80 }
+        host: { type: string, maxLength: 256 }
+        port: { type: string, maxLength: 8 }
+        database: { type: string, maxLength: 256 }
+        jdbcUrl: { type: string, maxLength: 2048 }
+        username: { type: string, maxLength: 256 }
+        password: { type: string, maxLength: 2048, format: password }
+        ssl: { type: boolean, default: false }
     DatabasesResponse:
       type: object
       required: [databases]

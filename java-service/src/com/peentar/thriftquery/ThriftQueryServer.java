@@ -54,6 +54,9 @@ public final class ThriftQueryServer {
     private void start() throws IOException {
         server = HttpServer.create(new InetSocketAddress(config.host, config.port), 0);
         server.createContext("/api/health", this::health);
+        server.createContext("/api/connections/test", this::testConnection);
+        server.createContext("/api/connections/connect", this::connect);
+        server.createContext("/api/connections/disconnect", this::disconnect);
         server.createContext("/api/query", this::query);
         server.createContext("/api/databases", this::databases);
         server.createContext("/api/namespaces", this::namespaces);
@@ -63,7 +66,7 @@ public final class ThriftQueryServer {
         server.setExecutor(executor);
         server.start();
         System.out.println("GridBase (Java JDBC) running at http://" + config.host + ":" + config.port);
-        System.out.println("JDBC driver: org.apache.hive.jdbc.HiveDriver");
+        System.out.println("JDBC driver: " + (jdbc.profile() == null ? "not configured" : jdbc.profile().type().driverClass()));
     }
 
     private void stop() {
@@ -80,11 +83,59 @@ public final class ThriftQueryServer {
     }
 
     private String healthPayload() {
-        String status = config.configured() ? "ok" : "degraded";
+        ConnectionProfile profile = jdbc.profile();
+        String status = profile == null ? "degraded" : "ok";
         return "{\"status\":" + JsonUtil.quote(status)
-                + ",\"configured\":" + config.configured()
+                + ",\"configured\":" + (profile != null)
                 + ",\"readOnly\":false"
-                + ",\"target\":" + JsonUtil.quote(config.redactedTarget()) + "}";
+                + ",\"databaseType\":" + JsonUtil.quote(profile == null ? null : profile.type().id())
+                + ",\"connectionName\":" + JsonUtil.quote(profile == null ? null : profile.name())
+                + ",\"target\":" + JsonUtil.quote(profile == null ? config.redactedTarget() : profile.redactedUrl()) + "}";
+    }
+
+    private void testConnection(HttpExchange exchange) throws IOException {
+        if (!"POST".equals(exchange.getRequestMethod())) { methodNotAllowed(exchange); return; }
+        try {
+            ConnectionProfile candidate = ConnectionProfile.fromJson(readBody(exchange));
+            jdbc.testConnection(candidate);
+            sendJson(exchange, 200, "{\"ok\":true,\"connection\":" + candidate.safeJson() + "}");
+        } catch (IllegalArgumentException error) {
+            sendJson(exchange, 400, error(error.getMessage()));
+        } catch (ClassNotFoundException error) {
+            logDatabaseFailure(error);
+            sendJson(exchange, 503, error("Driver JDBC tidak ditemukan. Tambahkan driver PostgreSQL/MySQL ke classpath Java."));
+        } catch (SQLException error) {
+            logDatabaseFailure(error);
+            sendJson(exchange, 502, error(databaseFailureMessage("Koneksi", error)));
+        } finally {
+            exchange.close();
+        }
+    }
+
+    private void connect(HttpExchange exchange) throws IOException {
+        if (!"POST".equals(exchange.getRequestMethod())) { methodNotAllowed(exchange); return; }
+        try {
+            ConnectionProfile candidate = ConnectionProfile.fromJson(readBody(exchange));
+            jdbc.connect(candidate);
+            sendJson(exchange, 200, "{\"ok\":true,\"connection\":" + candidate.safeJson() + "}");
+        } catch (IllegalArgumentException error) {
+            sendJson(exchange, 400, error(error.getMessage()));
+        } catch (ClassNotFoundException error) {
+            logDatabaseFailure(error);
+            sendJson(exchange, 503, error("Driver JDBC tidak ditemukan. Tambahkan driver ke classpath Java."));
+        } catch (SQLException error) {
+            logDatabaseFailure(error);
+            sendJson(exchange, 502, error(databaseFailureMessage("Koneksi", error)));
+        } finally {
+            exchange.close();
+        }
+    }
+
+    private void disconnect(HttpExchange exchange) throws IOException {
+        if (!"POST".equals(exchange.getRequestMethod())) { methodNotAllowed(exchange); return; }
+        jdbc.disconnect();
+        sendJson(exchange, 200, "{\"ok\":true}");
+        exchange.close();
     }
 
     private void query(HttpExchange exchange) throws IOException {
@@ -109,10 +160,10 @@ public final class ThriftQueryServer {
             sendJson(exchange, 504, error("Query melewati batas waktu. Coba persempit filter atau batasi jumlah baris."));
         } catch (ClassNotFoundException error) {
             logDatabaseFailure(error);
-            sendJson(exchange, 503, error("Hive JDBC driver tidak ditemukan di classpath Java."));
+            sendJson(exchange, 503, error("Driver JDBC tidak ditemukan di classpath Java."));
         } catch (SQLException error) {
             logDatabaseFailure(error);
-            sendJson(exchange, 502, error("Query gagal dijalankan. Periksa koneksi dan kredensial Hive JDBC."));
+            sendJson(exchange, 502, error(databaseFailureMessage("Query", error)));
         } finally {
             exchange.close();
         }
@@ -142,7 +193,7 @@ public final class ThriftQueryServer {
             sendJson(exchange, 504, error(label + " tidak dapat dimuat karena query melewati batas waktu."));
         } catch (ClassNotFoundException | SQLException error) {
             logDatabaseFailure(error);
-            sendJson(exchange, 502, error(label + " tidak dapat dimuat. Periksa koneksi dan kredensial Hive JDBC."));
+            sendJson(exchange, 502, error(label + " tidak dapat dimuat. Periksa koneksi dan kredensial database."));
         } finally {
             exchange.close();
         }
@@ -172,10 +223,10 @@ public final class ThriftQueryServer {
             sendJson(exchange, 504, error("Metadata melewati batas waktu. Coba refresh kembali."));
         } catch (ClassNotFoundException error) {
             logDatabaseFailure(error);
-            sendJson(exchange, 503, error("Hive JDBC driver tidak ditemukan di classpath Java."));
+            sendJson(exchange, 503, error("Driver JDBC tidak ditemukan di classpath Java."));
         } catch (SQLException error) {
             logDatabaseFailure(error);
-            sendJson(exchange, 502, error("Metadata tidak dapat dimuat. Periksa koneksi Hive JDBC lalu refresh."));
+            sendJson(exchange, 502, error("Metadata tidak dapat dimuat. Periksa koneksi database lalu refresh."));
         } finally {
             exchange.close();
         }
@@ -245,6 +296,14 @@ public final class ThriftQueryServer {
 
     private static String error(String message) {
         return "{\"error\":" + JsonUtil.quote(message) + "}";
+    }
+
+    private static String databaseFailureMessage(String operation, SQLException error) {
+        String detail = error.getMessage();
+        if (detail == null || detail.isBlank()) return operation + " gagal. Periksa host, port, database, username, dan password.";
+        detail = detail.replaceAll("(?i)(password|pwd|secret|token)=?[^\\s;,&]*", "$1=••••••");
+        if (detail.length() > 320) detail = detail.substring(0, 320);
+        return operation + " gagal: " + detail;
     }
 
     private static void applySecurityHeaders(Headers headers) {

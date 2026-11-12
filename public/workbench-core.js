@@ -65,8 +65,15 @@
     }
     return out.trim();
   }
-  function quoteIdentifier(value){return '`'+String(value).replace(/`/g,'``')+'`';}
-  function tableSql(namespace,table){return `SELECT * FROM ${quoteIdentifier('s3tables')}.${quoteIdentifier(namespace)}.${quoteIdentifier(table)} LIMIT 50;`;}
+  function quoteIdentifier(value,databaseType='hive'){
+    const quote=databaseType==='postgresql'?'"':'`';
+    return quote+String(value).replaceAll(quote,quote+quote)+quote;
+  }
+  function qualifiedTable(namespace,table,databaseType='hive'){
+    const parts=databaseType==='hive'?['s3tables',namespace,table]:[namespace,table];
+    return parts.map(value=>quoteIdentifier(value,databaseType)).join('.');
+  }
+  function tableSql(namespace,table,databaseType='hive'){return `SELECT * FROM ${qualifiedTable(namespace,table,databaseType)} LIMIT 50;`;}
   let sequence=0;
   function newTab(name='Console',sql='') {return {id:'sql-'+Date.now().toString(36)+'-'+(++sequence),name,sql};}
   function restoreDrafts(raw) {
@@ -79,7 +86,7 @@
         ...(t.source && typeof t.source.namespace==='string' && typeof t.source.table==='string'?{source:{namespace:t.source.namespace,table:t.source.table}}:{})}));
       if(tabs.length)return {tabs,activeId:tabs.some(t=>t.id===data.activeId)?data.activeId:tabs[0].id};
     }catch{/* Corrupt or unavailable storage starts a clean console. */}
-    const tab=newTab('Console 1', 'SELECT\n  current_date() AS today,\n  current_database() AS database;');
+    const tab=newTab('Console 1', 'SELECT CURRENT_DATE AS today;');
     return {tabs:[tab],activeId:tab.id};
   }
   function serializeDrafts(state){return JSON.stringify({activeId:state.activeId,tabs:state.tabs.map(t=>({id:t.id,name:t.name,sql:t.sql,...(t.source?{source:t.source}:{})}))});}
@@ -113,5 +120,5 @@
     const cell=v=>{const s=v==null?'':String(v);return /[",\r\n]/.test(s)?'"'+s.replace(/"/g,'""')+'"':s;};
     return [columns,...rows.map(r=>columns.map(c=>r[c]))].map(r=>r.map(cell).join(',')).join('\r\n');
   }
-  return {tokens,statementRanges,executionSql,escapeHtml,highlightSql,formatSql,quoteIdentifier,tableSql,newTab,restoreDrafts,serializeDrafts,viewRows,toCsv,KEYWORDS};
+  return {tokens,statementRanges,executionSql,escapeHtml,highlightSql,formatSql,quoteIdentifier,qualifiedTable,tableSql,newTab,restoreDrafts,serializeDrafts,viewRows,toCsv,KEYWORDS};
 });

@@ -47,6 +47,24 @@ public final class JsonUtil {
         throw new IllegalArgumentException("Unterminated JSON string");
     }
 
+    public static String stringFieldOrDefault(String json, String field, String fallback) {
+        String key = "\"" + field + "\"";
+        if (json == null || json.indexOf(key) < 0) return fallback;
+        return stringField(json, field);
+    }
+
+    public static boolean booleanFieldOrDefault(String json, String field, boolean fallback) {
+        String key = "\"" + field + "\"";
+        int keyIndex = json == null ? -1 : json.indexOf(key);
+        if (keyIndex < 0) return fallback;
+        int colon = json.indexOf(':', keyIndex + key.length());
+        if (colon < 0) throw new IllegalArgumentException("Invalid JSON field");
+        String value = json.substring(colon + 1).trim().toLowerCase();
+        if (value.startsWith("true")) return true;
+        if (value.startsWith("false")) return false;
+        throw new IllegalArgumentException("JSON field must be boolean");
+    }
+
     public static String quote(String value) {
         if (value == null) return "null";
         StringBuilder result = new StringBuilder("\"");

@@ -190,6 +190,28 @@ svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width:
 .workbench-dialog form > label { display: block; color: var(--muted); margin-bottom: 6px; }
 .workbench-dialog input { width: 100%; }
 .dialog-actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 20px; }
+.dialog-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 18px; }
+.dialog-heading h2 { margin-bottom: 4px; }
+.dialog-subtitle { color: var(--muted); font-size: 12px; line-height: 1.6; margin: 0 0 16px; max-width: 58ch; }
+.connection-dialog { width: min(700px, calc(100% - 32px)); max-height: min(760px, calc(100% - 32px)); overflow: auto; }
+.connection-layout { display: grid; grid-template-columns: 205px minmax(0, 1fr); gap: 18px; }
+.saved-connections { border: 1px solid var(--border); border-radius: 4px; min-height: 280px; overflow: hidden; }
+.saved-heading { display: flex; align-items: center; justify-content: space-between; padding: 7px 8px 7px 10px; border-bottom: 1px solid var(--border); color: var(--muted); font-size: 12px; }
+.saved-connection { display: flex; align-items: stretch; border-bottom: 1px solid #34363b; }
+.saved-connection-main { display: grid; grid-template-columns: 18px minmax(0, 1fr); grid-template-rows: auto auto; column-gap: 6px; flex: 1; text-align: left; padding: 8px 5px 8px 9px; min-width: 0; }
+.saved-connection-main svg { grid-row: 1 / -1; width: 15px; height: 15px; color: var(--blue); margin-top: 2px; }
+.saved-connection-main span, .saved-connection-main small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.saved-connection-main small { color: var(--muted); font-size: 11px; }
+.saved-connection-remove { width: 26px; color: var(--muted); }
+.connection-fields { min-width: 0; }
+.connection-fields > label, .connection-fields .field-grid label { display: block; color: var(--muted); margin: 0 0 5px; font-size: 12px; }
+.connection-fields > input, .connection-fields > select, .connection-fields .field-grid input { width: 100%; margin-bottom: 11px; }
+.field-grid { display: grid; grid-template-columns: minmax(0, 1fr) 120px; gap: 10px; }
+.field-grid input { display: block; }
+.checkbox-field { display: flex !important; align-items: center; gap: 7px; margin: 0 0 7px !important; }
+.checkbox-field input { width: auto; margin: 0; }
+.form-status { min-height: 20px; color: var(--muted); font-size: 12px; line-height: 1.5; margin: 5px 0 0; overflow-wrap: anywhere; }
+.form-status:not(:empty) { color: #f2cc8f; }
 .row-detail { width: min(800px, calc(100% - 32px)); padding: 0; }
 .row-detail .pane-heading { padding: 8px 10px 8px 16px; }
 .row-detail h2 { margin: 0; font-size: 14px; }
@@ -226,6 +248,7 @@ body.is-resizing { user-select: none; }
   .editor-status { font-size: 12px; padding-left: 8px; }
 }
 @media (max-width: 420px) { #connection-label { max-width: 64px; } .product-icon { display: none; } .console-context { flex-basis: 100%; } .editor-toolbar { min-height: 62px; } .console-panel { min-height: 165px; } }
+@media (max-width: 620px) { .connection-layout { grid-template-columns: 1fr; } .saved-connections { min-height: 100px; max-height: 150px; } .connection-dialog { padding: 14px; } }
 @media (prefers-reduced-motion: reduce) { .result-state.is-loading > svg { animation: none; } }
 @media (forced-colors: active) { #sql-editor { color: CanvasText; -webkit-text-fill-color: CanvasText; } .sql-highlight { visibility: hidden; } }
 
