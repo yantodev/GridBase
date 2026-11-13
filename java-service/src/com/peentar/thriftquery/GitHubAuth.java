@@ -36,9 +36,24 @@ final class GitHubAuth {
     private final Map<String, Session> sessions = new ConcurrentHashMap<>();
 
     @FunctionalInterface
-    interface IdentityProvider { String login(String code, String verifier) throws Exception; }
+    interface IdentityProvider { User login(String code, String verifier) throws Exception; }
+    record User(String id, String login) {
+        User {
+            validId(id);
+            if (login == null || !login.matches("[A-Za-z0-9-]{1,39}")) throw new IllegalArgumentException("Invalid GitHub login");
+        }
+        String toJson() { return "{\"id\":" + JsonUtil.quote(id) + ",\"login\":" + JsonUtil.quote(login) + "}"; }
+    }
+    static String validId(String id) {
+        if (id == null || !id.matches("[1-9][0-9]{0,19}")) throw new IllegalArgumentException("Invalid GitHub ID");
+        return id;
+    }
+    User user(HttpExchange exchange) {
+        Session session = sessions.get(cookie(exchange, SESSION_COOKIE));
+        return session == null || session.expiresAt() <= clock.getAsLong() ? null : session.user();
+    }
     private record Pending(String verifier, long expiresAt) {}
-    private record Session(String login, long expiresAt) {}
+    private record Session(User user, long expiresAt) {}
 
     GitHubAuth(AuthConfig config) { this(config, new GitHubProvider(config), System::currentTimeMillis); }
     GitHubAuth(AuthConfig config, IdentityProvider provider) { this(config, provider, System::currentTimeMillis); }
@@ -79,7 +94,7 @@ final class GitHubAuth {
         if (path.equals("/api/auth/session")) {
             if (!method.equals("GET")) return methodNotAllowed(exchange, "GET");
             json(exchange, 200, "{\"authenticated\":" + (session != null) + ",\"configured\":" + config.configured()
-                    + ",\"user\":" + (session == null ? "null" : "{\"login\":" + JsonUtil.quote(session.login()) + "}") + "}");
+                    + ",\"user\":" + (session == null ? "null" : session.user().toJson()) + "}");
             return true;
         }
         if (PUBLIC_FILES.contains(path) && method.equals("GET")) {
@@ -92,6 +107,10 @@ final class GitHubAuth {
             if (path.startsWith("/api/") || path.equals("/auth/logout")) json(exchange, 401, "{\"error\":\"Silakan login dengan GitHub.\"}");
             else redirect(exchange, "/login");
             return true;
+        }
+        String expected = exchange.getRequestHeaders().getFirst("X-GridBase-Account");
+        if (expected != null && !expected.equals(session.user().id())) {
+            json(exchange, 409, "{\"error\":\"Akun berubah. Muat ulang aplikasi.\"}"); return true;
         }
         if (!method.equals("GET") && !method.equals("HEAD")) {
             String origin = exchange.getRequestHeaders().getFirst("Origin");
@@ -127,15 +146,15 @@ final class GitHubAuth {
         String code = params.getOrDefault("code", "");
         if (!config.configured() || code.isBlank() || code.length() > 2048) { redirect(exchange, "/login?error=failed"); return; }
         try {
-            String login = provider.login(code, attempt.verifier());
-            if (login == null || !login.matches("[A-Za-z0-9-]{1,39}")) throw new IllegalArgumentException("Invalid GitHub login");
+            User user = java.util.Objects.requireNonNull(provider.login(code, attempt.verifier()));
+            String login = user.login();
             if (!config.allowedUsers().isEmpty() && !config.allowedUsers().contains(login.toLowerCase(Locale.ROOT))) {
                 redirect(exchange, "/login?error=not_allowed"); return;
             }
             if (sessions.size() >= 10000) { redirect(exchange, "/login?error=busy"); return; }
             sessions.remove(cookie(exchange, SESSION_COOKIE));
             String token = randomToken();
-            sessions.put(token, new Session(login, clock.getAsLong() + SESSION_SECONDS * 1000));
+            sessions.put(token, new Session(user, clock.getAsLong() + SESSION_SECONDS * 1000));
             setCookie(exchange, SESSION_COOKIE, token, "/", SESSION_SECONDS);
             redirect(exchange, "/");
         } catch (Exception failure) {
@@ -206,7 +225,7 @@ final class GitHubAuth {
                 .followRedirects(HttpClient.Redirect.NEVER).build();
         GitHubProvider(AuthConfig config) { this.config = config; }
 
-        @Override public String login(String code, String verifier) throws Exception {
+        @Override public User login(String code, String verifier) throws Exception {
             String form = "client_id=" + encode(config.clientId()) + "&client_secret=" + encode(config.clientSecret())
                     + "&code=" + encode(code) + "&redirect_uri=" + encode(config.callbackUrl()) + "&code_verifier=" + encode(verifier);
             HttpResponse<String> tokenResponse = client.send(HttpRequest.newBuilder(URI.create("https://github.com/login/oauth/access_token"))
@@ -220,7 +239,7 @@ final class GitHubAuth {
                     .header("User-Agent", "GridBase").header("X-GitHub-Api-Version", "2022-11-28")
                     .header("Authorization", "Bearer " + token).GET().build(), HttpResponse.BodyHandlers.ofString());
             if (identity.statusCode() != 200) throw new IOException("GitHub identity request failed");
-            return JsonUtil.stringField(identity.body(), "login");
+            return new User(JsonUtil.positiveIntegerField(identity.body(), "id"), JsonUtil.stringField(identity.body(), "login"));
         }
     }
 }

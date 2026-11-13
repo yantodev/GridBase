@@ -27,7 +27,7 @@
     <symbol id="i-settings" viewBox="0 0 20 20"><path d="M8 2h4l.7 2.1 2 .9 2-.8 2.1 2.1-.8 2 1 2 .9.7v4l-2.1.7-1 2-2-.8-2 .9H8l-.7-2.1-2-.9-2 .8-2.1-2.1.8-2-1-2-.9-.7v-4l2.1-.7 1-2 2 .8 2-.9Z"/><circle cx="10" cy="10" r="2.5"/></symbol>
   </defs></svg>
   <a class="skip-link" href="#sql-editor">Skip to SQL editor</a>
-  <div id="app" class="ide-shell">
+  <div id="app" class="ide-shell" hidden>
     <header class="titlebar">
       <svg class="product-icon" aria-hidden="true"><use href="#i-database"/></svg>
       <h1>GridBase</h1><span class="title-divider"></span><span id="project-name" class="project-name">s3tables</span>
@@ -107,8 +107,7 @@
   </dialog>
   <dialog id="rename-dialog" class="workbench-dialog" aria-labelledby="rename-heading"><form id="rename-form"><h2 id="rename-heading">Rename console</h2><label for="console-name">Console name</label><input id="console-name" maxlength="80" required autocomplete="off" /><div class="dialog-actions"><button id="cancel-rename" class="tool-button" type="button">Cancel</button><button class="primary-button" type="submit">Save</button></div></form></dialog>
   <dialog id="row-detail" class="workbench-dialog row-detail" aria-labelledby="row-detail-heading"><header class="pane-heading"><h2 id="row-detail-heading">Row detail</h2><button id="close-row-detail" class="icon-button" type="button" aria-label="Close row detail"><svg><use href="#i-close"/></svg></button></header><div id="row-detail-table-wrap" class="row-detail-table-wrap"></div></dialog>
-  <script src="/session.js" defer></script>
   <script src="/workbench-core.js" defer></script>
-  <script src="/app.js" defer></script>
+  <script src="/session.js" defer></script>
 </body>
 </html>

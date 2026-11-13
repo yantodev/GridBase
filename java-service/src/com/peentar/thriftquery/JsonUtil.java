@@ -6,6 +6,14 @@ public final class JsonUtil {
     private JsonUtil() {
     }
 
+    public static String positiveIntegerField(String json, String field) {
+        int start = fieldValueStart(json, field), end = start;
+        if (start < 0) throw new IllegalArgumentException("Missing JSON field");
+        while (end < json.length() && json.charAt(end) >= '0' && json.charAt(end) <= '9') end++;
+        if (end < json.length() && !Character.isWhitespace(json.charAt(end)) && ",}]".indexOf(json.charAt(end)) < 0) throw new IllegalArgumentException("Invalid integer");
+        return GitHubAuth.validId(json.substring(start, end));
+    }
+
     public static String stringField(String json, String field) {
         int cursor = fieldValueStart(json, field);
         if (cursor < 0) throw new IllegalArgumentException("Missing JSON field");

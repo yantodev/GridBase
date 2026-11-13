@@ -30,7 +30,9 @@ async function githubIdentity(code, verifier, config) {
     headers: {'Accept': 'application/vnd.github+json', 'User-Agent': 'GridBase', 'X-GitHub-Api-Version': '2022-11-28',
       'Authorization': 'Bearer ' + accessToken}});
   if (!identity.ok) throw new Error('GitHub identity request failed');
-  return (await identity.json()).login;
+  const user = await identity.json();
+  if (!Number.isSafeInteger(user.id) || user.id <= 0) throw new Error('Invalid GitHub ID');
+  return {id: String(user.id), login: user.login};
 }
 
 function createAuth(environment, {sendJson, securityHeaders, identify = githubIdentity, now = Date.now}) {
@@ -89,7 +91,10 @@ function createAuth(environment, {sendJson, securityHeaders, identify = githubId
       const code = url.searchParams.get('code') || '';
       if (!configured || !code.trim() || code.length > 2048) { redirect(response, '/login?error=failed'); return true; }
       try {
-        const login = await identify(code, attempt.verifier, config);
+        const identity = await identify(code, attempt.verifier, config);
+        if (typeof identity?.id !== 'string' || !/^[1-9][0-9]{0,19}$/.test(identity.id)) throw new Error('Invalid GitHub ID');
+        const login = identity.login;
+        const user = Object.freeze({id: identity.id, login});
         if (typeof login !== 'string' || !/^[A-Za-z0-9-]{1,39}$/.test(login)) throw new Error('Invalid GitHub login');
         if (config.allowedUsers.size && !config.allowedUsers.has(login.toLowerCase())) {
           redirect(response, '/login?error=not_allowed'); return true;
@@ -97,7 +102,7 @@ function createAuth(environment, {sendJson, securityHeaders, identify = githubId
         if (sessions.size >= 10000) { redirect(response, '/login?error=busy'); return true; }
         sessions.delete(cookie(request, 'gridbase_session'));
         const sessionToken = token();
-        sessions.set(sessionToken, {login, expiresAt: now() + SESSION_SECONDS * 1000});
+        sessions.set(sessionToken, {user, expiresAt: now() + SESSION_SECONDS * 1000});
         setCookie(response, 'gridbase_session', sessionToken, '/', SESSION_SECONDS);
         redirect(response, '/');
       } catch { redirect(response, '/login?error=failed'); }
@@ -105,7 +110,7 @@ function createAuth(environment, {sendJson, securityHeaders, identify = githubId
     }
     if (path === '/api/auth/session') {
       if (method !== 'GET') return methodNotAllowed(response, 'GET');
-      sendJson(response, 200, {authenticated: Boolean(session), configured, user: session ? {login: session.login} : null}); return true;
+      sendJson(response, 200, {authenticated: Boolean(session), configured, user: session ? session.user : null}); return true;
     }
     if (publicFiles.has(path) && method === 'GET') {
       if (session && ['/login', '/login.html'].includes(path)) { redirect(response, '/'); return true; }
@@ -116,6 +121,11 @@ function createAuth(environment, {sendJson, securityHeaders, identify = githubId
       else redirect(response, '/login');
       return true;
     }
+    const expected = request.headers['x-gridbase-account'];
+    if (expected !== undefined && expected !== session.user.id) {
+      sendJson(response, 409, {error: 'Akun berubah. Muat ulang aplikasi.'}); return true;
+    }
+    request.user = session.user;
     if (!['GET', 'HEAD'].includes(method)) {
       const origin = request.headers.origin, type = request.headers['content-type'];
       if (origin && origin !== config.appUrl || request.headers['sec-fetch-site'] === 'cross-site'

@@ -1,8 +1,8 @@
 openapi: 3.0.3
 info:
   title: GridBase API
-  version: 1.0.0
-  description: API for querying and changing data through Java JDBC, protected by GitHub OAuth sessions. All database endpoints require the HttpOnly session cookie. POST requests use application/json and mutations must originate from APP_URL. Connection profiles persist in a shared encrypted SQLite store with stable IDs. Startup restores profiles as disconnected, without an implicit default. Requests without an ID use the first connection added at runtime; an unknown explicit ID never falls back. Supported databases are Spark Thrift/Hive, PostgreSQL, and MySQL.
+  version: 1.1.0
+  description: API for querying and changing data through Java JDBC, protected by GitHub OAuth sessions. All database endpoints require the HttpOnly session cookie. POST requests use application/json and mutations must originate from APP_URL. Connection profiles persist encrypted in SQLite and belong to the verified stable numeric GitHub account ID. All connection, health, query, and metadata operations are scoped to that account. Foreign connection IDs return 404 before opening JDBC. The optional X-GridBase-Account header binds a browser tab to its expected session account; a mismatch returns 409 before any operation and never selects an owner. Startup restores profiles as disconnected, without an implicit default. Requests without an ID use the first connection connected at runtime in that account; an unknown explicit ID never falls back. Supported databases are Spark Thrift/Hive, PostgreSQL, and MySQL.
 servers:
   - url: http://127.0.0.1:4173
 security:
@@ -26,7 +26,9 @@ paths:
                   user:
                     type: object
                     nullable: true
+                    required: [id, login]
                     properties:
+                      id: { type: string, pattern: '^[1-9][0-9]{0,19}$', description: Stable numeric GitHub account ID }
                       login: { type: string }
   /auth/github:
     get:
@@ -62,9 +64,12 @@ paths:
       responses:
         '200': { description: Server is running }
   /api/health:
+    parameters:
+      - $ref: '#/components/parameters/ExpectedAccount'
     get:
       summary: Return non-sensitive connection metadata
       responses:
+        '409': { description: 'Session account differs from X-GridBase-Account. Reload before retrying.' }
         '200':
           description: Service status
           content:
@@ -72,9 +77,12 @@ paths:
               schema:
                 $ref: '#/components/schemas/HealthResponse'
   /api/connections:
+    parameters:
+      - $ref: '#/components/parameters/ExpectedAccount'
     get:
       summary: List saved profiles and connected states without credentials
       responses:
+        '409': { description: 'Session account differs from X-GridBase-Account. Reload before retrying.' }
         '200':
           description: Configured connections and legacy default ID
           content:
@@ -96,6 +104,7 @@ paths:
           application/json:
             schema: { $ref: '#/components/schemas/ConnectionRequest' }
       responses:
+        '409': { description: 'Session account differs from X-GridBase-Account. Reload before retrying.' }
         '200':
           description: Configuration saved
           content:
@@ -109,14 +118,16 @@ paths:
         '503': { description: Configuration storage unavailable }
   /api/connections/{connectionId}:
     parameters:
+      - $ref: '#/components/parameters/ExpectedAccount'
       - in: path
         name: connectionId
         required: true
         schema: { type: string, pattern: '^[a-zA-Z0-9_-]{1,100}$' }
     get:
       summary: Load a saved profile for editing, including credentials
-      description: Returns the full JDBC URL and password only on explicit edit. Responses use Cache-Control no-store. This local workbench uses application access as its trust boundary.
+      description: Returns the full JDBC URL and password only on explicit edit. Responses use Cache-Control no-store. Only the verified owner account can access this profile; unknown or foreign IDs return 404.
       responses:
+        '409': { description: 'Session account differs from X-GridBase-Account. Reload before retrying.' }
         '200':
           description: Saved configuration
           content:
@@ -127,10 +138,13 @@ paths:
     delete:
       summary: Delete the saved profile and disconnect it
       responses:
+        '409': { description: 'Session account differs from X-GridBase-Account. Reload before retrying.' }
         '200': { description: Profile deleted }
         '404': { description: Unknown profile }
         '503': { description: Configuration storage unavailable }
   /api/connections/test:
+    parameters:
+      - $ref: '#/components/parameters/ExpectedAccount'
     post:
       summary: Test a JDBC connection without activating it
       requestBody:
@@ -140,11 +154,14 @@ paths:
             schema:
               $ref: '#/components/schemas/ConnectionRequest'
       responses:
+        '409': { description: 'Session account differs from X-GridBase-Account. Reload before retrying.' }
         '200': { description: Connection succeeded }
         '400': { description: Invalid connection details }
         '502': { description: Database rejected the connection }
         '503': { description: JDBC driver unavailable }
   /api/connections/connect:
+    parameters:
+      - $ref: '#/components/parameters/ExpectedAccount'
     post:
       summary: Test, persist, and connect one JDBC profile
       requestBody:
@@ -154,6 +171,7 @@ paths:
             schema:
               $ref: '#/components/schemas/ConnectionRequest'
       responses:
+        '409': { description: 'Session account differs from X-GridBase-Account. Reload before retrying.' }
         '200':
           description: Connection registered; other connections remain available
           content:
@@ -167,6 +185,8 @@ paths:
         '502': { description: Database rejected the connection }
         '503': { description: JDBC driver unavailable }
   /api/connections/disconnect:
+    parameters:
+      - $ref: '#/components/parameters/ExpectedAccount'
     post:
       summary: Disconnect the specified connection while retaining its saved configuration
       requestBody:
@@ -179,9 +199,12 @@ paths:
               properties:
                 connectionId: { type: string }
       responses:
+        '409': { description: 'Session account differs from X-GridBase-Account. Reload before retrying.' }
         '200': { description: Disconnected }
         '404': { description: Unknown connection ID }
   /api/query:
+    parameters:
+      - $ref: '#/components/parameters/ExpectedAccount'
     post:
       summary: Execute a SQL statement through the selected Java JDBC connection
       description: Accepts one SELECT, WITH, SHOW, DESCRIBE, EXPLAIN, CREATE, INSERT, UPDATE, DELETE, MERGE, ALTER, DROP, or TRUNCATE statement. Successful statements without a result set return empty columns and rows, with updateCount when the driver reports an affected-row count.
@@ -192,6 +215,7 @@ paths:
             schema:
               $ref: '#/components/schemas/QueryRequest'
       responses:
+        '409': { description: 'Session account differs from X-GridBase-Account. Reload before retrying.' }
         '404': { description: Unknown connection ID; no fallback to another connection }
         '200':
           description: Query result
@@ -210,12 +234,15 @@ paths:
         '504':
           description: Query timed out
   /api/databases:
+    parameters:
+      - $ref: '#/components/parameters/ExpectedAccount'
     get:
       summary: List databases or schemas available to the selected connection
       parameters:
         - $ref: '#/components/parameters/ConnectionId'
       description: Uses Spark metadata SQL for Hive and DatabaseMetaData for PostgreSQL/MySQL.
       responses:
+        '409': { description: 'Session account differs from X-GridBase-Account. Reload before retrying.' }
         '404': { description: Unknown connection ID; no fallback to another connection }
         '200':
           description: Available databases
@@ -230,6 +257,8 @@ paths:
         '504':
           description: Database lookup timed out
   /api/tables:
+    parameters:
+      - $ref: '#/components/parameters/ExpectedAccount'
     get:
       summary: List tables in a database or schema
       description: Metadata uses a separate 10000-row ceiling, independent of DEFAULT_QUERY_LIMIT.
@@ -237,6 +266,7 @@ paths:
         - $ref: '#/components/parameters/ConnectionId'
         - $ref: '#/components/parameters/Namespace'
       responses:
+        '409': { description: 'Session account differs from X-GridBase-Account. Reload before retrying.' }
         '404': { description: Unknown connection ID; no fallback to another connection }
         '200':
           description: Available tables
@@ -254,6 +284,8 @@ paths:
         '503': { description: Connection or driver unavailable }
         '504': { description: Lookup timed out }
   /api/columns:
+    parameters:
+      - $ref: '#/components/parameters/ExpectedAccount'
     get:
       summary: Describe typed columns of a table in the selected connection
       parameters:
@@ -264,6 +296,7 @@ paths:
           required: true
           schema: { type: string, minLength: 1, maxLength: 256 }
       responses:
+        '409': { description: 'Session account differs from X-GridBase-Account. Reload before retrying.' }
         '404': { description: Unknown connection ID; no fallback to another connection }
         '200':
           description: Unique columns without partition separator rows
@@ -287,6 +320,8 @@ paths:
         '503': { description: Connection or driver unavailable }
         '504': { description: Lookup timed out }
   /api/namespaces:
+    parameters:
+      - $ref: '#/components/parameters/ExpectedAccount'
     get:
       deprecated: true
       summary: Deprecated alias for listing databases
@@ -294,6 +329,7 @@ paths:
         - $ref: '#/components/parameters/ConnectionId'
       description: Compatibility endpoint. Use /api/databases for new clients.
       responses:
+        '409': { description: 'Session account differs from X-GridBase-Account. Reload before retrying.' }
         '404': { description: Unknown connection ID; no fallback to another connection }
         '200':
           description: Available databases in the legacy namespaces field
@@ -313,12 +349,18 @@ components:
       type: apiKey
       in: cookie
       name: gridbase_session
-      description: Opaque HttpOnly SameSite=Lax cookie created by GitHub OAuth. Secure on HTTPS. Database endpoints return 401 when missing or expired. Sessions are shared-workspace access and expire after eight hours or a server restart.
+      description: Opaque HttpOnly SameSite=Lax cookie created by GitHub OAuth. Secure on HTTPS. Database endpoints return 401 when missing or expired. Sessions access only the account's own workspace and expire after eight hours or a server restart.
   parameters:
+    ExpectedAccount:
+      in: header
+      name: X-GridBase-Account
+      required: false
+      description: Expected stable GitHub session ID. A mismatch returns 409; this header never selects the connection owner.
+      schema: { type: string, pattern: '^[1-9][0-9]{0,19}$' }
     ConnectionId:
       in: query
       name: connectionId
-      description: Stable ID from /api/connections. Unknown IDs return 404 with no fallback.
+      description: Stable ID from /api/connections. Unknown or foreign-account IDs return 404 with no fallback.
       schema: { type: string, maxLength: 100, pattern: '^[a-zA-Z0-9_-]+$' }
     Namespace:
       in: query

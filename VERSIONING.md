@@ -50,7 +50,7 @@ serta `npm run check` juga menjalankan pemeriksaan ini.
 1. Pastikan fitur yang akan dirilis sudah siap dan branch `master` sesuai dengan remote.
 2. Jalankan perintah bump yang sesuai, atau `version:set` untuk versi yang sudah ditentukan.
 3. Buat deskripsi pada `docs/releases/V<versi>.md`, misalnya
-   [`docs/releases/V1.0.0.md`](./docs/releases/V1.0.0.md). Jelaskan fitur, perbaikan,
+   [`docs/releases/V1.1.0.md`](./docs/releases/V1.1.0.md). Jelaskan fitur, perbaikan,
    perubahan kompatibilitas, kebutuhan konfigurasi, dan batasan yang relevan.
 4. Jalankan `npm test` dan `npm run check`. Atur `SPARK_HOME` sesuai instalasi lokal;
    lihat [README](./README.md#menjalankan-secara-lokal).

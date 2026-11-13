@@ -24,7 +24,7 @@ function loadDotEnv(filePath = path.join(ROOT, ".env"), environment = process.en
   const lines = fs.readFileSync(filePath, "utf8").split(/\r?\n/);
   for (const line of lines) {
     const match = line.match(/^\s*([A-Z][A-Z0-9_]*)\s*=\s*(.*)\s*$/);
-    if (!match || !["PORT", "QUERY_TIMEOUT_MS", "DEFAULT_QUERY_LIMIT", "APP_URL", "GITHUB_CLIENT_ID", "GITHUB_CLIENT_SECRET", "GITHUB_ALLOWED_USERS"].includes(match[1]) || environment[match[1]]?.trim()) continue;
+    if (!match || !["PORT", "QUERY_TIMEOUT_MS", "DEFAULT_QUERY_LIMIT", "APP_URL", "GITHUB_CLIENT_ID", "GITHUB_CLIENT_SECRET", "GITHUB_ALLOWED_USERS", "LEGACY_CONNECTION_OWNER_ID"].includes(match[1]) || environment[match[1]]?.trim()) continue;
     const rawValue = match[2].trim();
     const quoted = (rawValue.startsWith('"') && rawValue.endsWith('"')) || (rawValue.startsWith("'") && rawValue.endsWith("'"));
     environment[match[1]] = quoted && rawValue.length >= 2 ? rawValue.slice(1, -1) : rawValue;
@@ -380,12 +380,17 @@ function serveStatic(request, response) {
 }
 
 function createServer(options = {}) {
-  const auth = createAuth(options.environment || process.env, {sendJson, securityHeaders, identify: options.identify, now: options.now});
+  const environment = options.environment || process.env;
+  const legacyOwner = (environment.LEGACY_CONNECTION_OWNER_ID || '').trim();
+  if (legacyOwner && !/^[1-9][0-9]{0,19}$/.test(legacyOwner)) throw new Error('Invalid legacy owner ID');
+  const auth = createAuth(environment, {sendJson, securityHeaders, identify: options.identify, now: options.now});
   return http.createServer(async (request, response) => {
     const url = new URL(request.url, "http://localhost");
     if (await auth(request, response, url)) return;
+    const ownsConnection = Boolean(legacyOwner && request.user?.id === legacyOwner);
+    const privateHealth = ownsConnection ? getHealth() : {status: 'degraded', configured: false, readOnly: false, target: null};
     if (request.method === "GET" && url.pathname === "/api/connections") {
-      const health = getHealth();
+      const health = privateHealth;
       sendJson(response, 200, { defaultConnectionId: health.configured ? "default" : null,
         connections: health.configured ? [{ id: "default", name: "Spark Thrift / Hive", type: "hive" }] : [] });
       return;
@@ -393,6 +398,15 @@ function createServer(options = {}) {
     if (request.method === "POST" && url.pathname.startsWith("/api/connections/")) {
       sendJson(response, 501, { error: "Multi koneksi membutuhkan backend Java JDBC. Jalankan npm start." });
       return;
+    }
+    const databasePaths = ['/api/query', '/api/databases', '/api/namespaces', '/api/tables', '/api/columns'];
+    if (!ownsConnection && databasePaths.includes(url.pathname)) {
+      let explicit = url.searchParams.get('connectionId');
+      if (url.pathname === '/api/query' && request.method === 'POST') {
+        try { explicit = (await readJsonBody(request)).connectionId; }
+        catch (error) { sendJson(response, error.statusCode || 400, {error: 'Request tidak valid.'}); return; }
+      }
+      sendJson(response, explicit ? 404 : 503, {error: explicit ? 'Koneksi tidak ditemukan.' : 'Koneksi database belum dikonfigurasi untuk akun ini.'}); return;
     }
     if (request.method === "GET" && ["/api/databases", "/api/namespaces", "/api/tables", "/api/columns"].includes(url.pathname)
         && url.searchParams.get("connectionId") && url.searchParams.get("connectionId") !== "default") {
@@ -402,19 +416,19 @@ function createServer(options = {}) {
       await handleMetadata(response, url);
       return;
     }
-    if (request.method === "GET" && request.url?.startsWith("/api/health")) {
-      sendJson(response, 200, getHealth());
+    if (request.method === "GET" && url.pathname === "/api/health") {
+      sendJson(response, 200, privateHealth);
       return;
     }
-    if (request.method === "POST" && request.url === "/api/query") {
+    if (request.method === "POST" && url.pathname === "/api/query") {
       await handleQuery(request, response);
       return;
     }
-    if (request.method === "GET" && request.url?.startsWith("/api/databases")) {
+    if (request.method === "GET" && url.pathname === "/api/databases") {
       await handleDatabases(response);
       return;
     }
-    if (request.method === "GET" && request.url?.startsWith("/api/namespaces")) {
+    if (request.method === "GET" && url.pathname === "/api/namespaces") {
       await handleNamespaces(response);
       return;
     }

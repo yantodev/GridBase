@@ -12,10 +12,10 @@ public final class ConnectionStoreTest {
         Path root = Files.createTempDirectory("gridbase-sqlite");
         try {
             Path data = root.resolve("data");
-            ConnectionStore store = new ConnectionStore(data);
+            ConnectionStore store = new ConnectionStore(data, "1001");
             ConnectionSettings settings = ConnectionSettings.fromJson("{\"type\":\"hive\",\"name\":\"Fixture's DB\",\"jdbcUrl\":\"jdbc:hive2://fixture/default;transportMode=http;token=url-secret\",\"username\":\"fixture\",\"password\":\"stored-secret\",\"database\":\"default\"}");
             store.save("fixture-id", settings);
-            ConnectionStore reopened = new ConnectionStore(data);
+            ConnectionStore reopened = new ConnectionStore(data, "1001");
             var restored = reopened.load().get("fixture-id");
             check(restored.profile().password().equals("stored-secret"), "Password round trip");
             check(restored.profile().jdbcUrl().equals(settings.profile().jdbcUrl()), "JDBC round trip");
@@ -30,16 +30,16 @@ public final class ConnectionStoreTest {
             check(!registry.entries().get(0).toJson().contains("stored-secret"), "List must omit credentials");
             registry.save("fixture-id",ConnectionSettings.fromJson("{\"type\":\"postgresql\",\"name\":\"Updated\",\"host\":\"offline.fixture\",\"database\":\"app\",\"username\":\"fixture\",\"password\":\"updated-secret\"}"));
             check(registry.details("fixture-id").host().equals("offline.fixture"), "Offline save preserves form fields");
-            check(new ConnectionStore(data).load().get("fixture-id").profile().password().equals("updated-secret"), "Update persists");
+            check(new ConnectionStore(data, "1001").load().get("fixture-id").profile().password().equals("updated-secret"), "Update persists");
             ConnectionSettings keyNamed = ConnectionSettings.fromJson("{\"type\":\"hive\",\"name\":\"password\",\"jdbcUrl\":\"jdbc:hive2://fixture/default\",\"username\":\"fixture\",\"password\":\"exact-secret\"}");
             store.save("key-named", keyNamed);
-            check(new ConnectionStore(data).load().get("key-named").profile().password().equals("exact-secret"), "Names matching JSON fields must preserve password");
+            check(new ConnectionStore(data, "1001").load().get("key-named").profile().password().equals("exact-secret"), "Names matching JSON fields must preserve password");
             store.delete("key-named");
             check(opened.get() == 0, "Restore and offline save must not open remote connections");
             registry.delete("fixture-id");
-            check(new ConnectionStore(data).load().isEmpty(), "Delete persists");
+            check(new ConnectionStore(data, "1001").load().isEmpty(), "Delete persists");
             Files.delete(data.resolve("credentials.key"));
-            expectFailure(() -> new ConnectionStore(data));
+            expectFailure(() -> new ConnectionStore(data, "1001"));
             System.out.println("Encrypted SQLite connection store tests passed");
         } finally {
             try (var paths=Files.walk(root)) { for(Path path:paths.sorted(Comparator.reverseOrder()).toList()) Files.deleteIfExists(path); }

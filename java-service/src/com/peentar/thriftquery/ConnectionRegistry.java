@@ -18,8 +18,8 @@ public final class ConnectionRegistry {
     private final ConnectionStore store;
     private String defaultId;
 
-    public ConnectionRegistry(AppConfig config) {
-        this(profile -> new JdbcService(config, profile), new ConnectionStore(config.dataDir));
+    public ConnectionRegistry(AppConfig config, String ownerId) {
+        this(profile -> new JdbcService(config, profile), new ConnectionStore(config.dataDir, ownerId));
     }
 
     ConnectionRegistry(ServiceFactory factory) {
@@ -43,6 +43,7 @@ public final class ConnectionRegistry {
 
     public Entry connect(String requestedId, ConnectionSettings settings) throws SQLException, ClassNotFoundException {
         String id = connectionId(requestedId);
+        checkWritable(id);
         JdbcService service = factory.create(settings.profile());
         service.testConnection(); // Failed reconnects preserve the previous working profile.
         synchronized (this) {
@@ -74,6 +75,7 @@ public final class ConnectionRegistry {
 
     public synchronized Entry save(String requestedId, ConnectionSettings settings) {
         String id = connectionId(requestedId);
+        checkWritable(id);
         checkCapacity(id);
         JdbcService service = factory.create(settings.profile());
         if (store != null) store.save(id, settings);
@@ -94,6 +96,10 @@ public final class ConnectionRegistry {
         if (store != null) store.delete(id);
         entries.remove(id);
         if (id.equals(defaultId)) defaultId = null;
+    }
+
+    void checkWritable(String id) {
+        if (id != null && !id.isBlank() && store != null && !store.canWrite(id)) throw new UnknownConnectionException();
     }
 
     private static String connectionId(String requestedId) {

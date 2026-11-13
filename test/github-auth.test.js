@@ -1,7 +1,10 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const {createHash} = require('node:crypto');
-const {createServer} = require('../server');
+const fs = require('node:fs');
+const os = require('node:os');
+const path = require('node:path');
+const {createServer, config} = require('../server');
 const {authConfig} = require('../src/github-auth');
 const {beginLogin, completeLogin, login} = require('./auth-helpers');
 
@@ -39,7 +42,7 @@ test('OAuth binds browser state and PKCE, rejects replay, protects mutations and
   await withServer({environment, identify: async (code, verifier) => {
     calls++;
     assert.equal(createHash('sha256').update(verifier).digest('base64url'), expectedChallenge);
-    assert.equal(code, 'fixture'); return 'fixture-user';
+    assert.equal(code, 'fixture'); return {id: '1001', login: 'fixture-user'};
   }}, async base => {
     const flow = await beginLogin(base); expectedChallenge = flow.challenge;
     assert.equal(flow.authorization.searchParams.get('code_challenge_method'), 'S256');
@@ -53,7 +56,7 @@ test('OAuth binds browser state and PKCE, rejects replay, protects mutations and
     assert.match(cookies, /HttpOnly/); assert.match(cookies, /SameSite=Lax/); assert.match(cookies, /Max-Age=28800/);
     const cookie = cookies.match(/gridbase_session=[^;,]+/)[0];
     assert.equal((await request(base, '/', cookie)).status, 200);
-    assert.deepEqual(await (await request(base, '/api/auth/session', cookie)).json(), {authenticated: true, configured: true, user: {login: 'fixture-user'}});
+    assert.deepEqual(await (await request(base, '/api/auth/session', cookie)).json(), {authenticated: true, configured: true, user: {id: '1001', login: 'fixture-user'}});
     assert.equal((await request(base, '/login', cookie)).headers.get('location'), '/');
     assert.equal((await completeLogin(base, flow)).headers.get('location'), '/login?error=invalid_state');
     assert.equal(calls, 1);
@@ -73,9 +76,10 @@ test('denied, failed, unapproved, duplicate and expired callbacks cannot create 
   let time = 1_000_000;
   await withServer({environment, now: () => time, identify: async code => {
     if (code === 'failure') throw new Error('fixture');
-    return code === 'outsider' ? 'outsider' : 'fixture-user';
+    if (code === 'missing-id') return {login: 'fixture-user'};
+    return {id: '1001', login: code === 'outsider' ? 'outsider' : 'fixture-user'};
   }}, async base => {
-    for (const [code, error] of [['failure', 'failed'], ['outsider', 'not_allowed'], ['', 'failed']]) {
+    for (const [code, error] of [['failure', 'failed'], ['outsider', 'not_allowed'], ['missing-id', 'failed'], ['', 'failed']]) {
       const response = await completeLogin(base, await beginLogin(base), code);
       assert.equal(response.headers.get('location'), '/login?error=' + error);
       assert.doesNotMatch(response.headers.get('set-cookie'), /gridbase_session=/);
@@ -95,9 +99,65 @@ test('production origin validation and Secure cookies', async () => {
   for (const APP_URL of ['http://gridbase.example', 'https://gridbase.example/path', 'https://user:password@gridbase.example', 'https://gridbase.example?evil']) {
     assert.throws(() => authConfig({APP_URL}));
   }
-  await withServer({environment: {...environment, APP_URL: 'https://gridbase.example'}, identify: async () => 'fixture-user'}, async base => {
+  await withServer({environment: {...environment, APP_URL: 'https://gridbase.example'}, identify: async () => ({id: '1001', login: 'fixture-user'})}, async base => {
     const flow = await beginLogin(base);
     const response = await completeLogin(base, flow);
     assert.match(response.headers.get('set-cookie'), /gridbase_session=[^,]+; Secure/);
   });
+});
+
+test('legacy environment connection belongs only to its configured GitHub account', async () => {
+  const saved = {...config};
+  Object.assign(config, {jdbcUrl: 'jdbc:hive2://private.fixture/default', username: 'private-user', password: 'private-secret'});
+  try {
+    await withServer({environment: {...environment, GITHUB_ALLOWED_USERS: '', LEGACY_CONNECTION_OWNER_ID: '1001'},
+      identify: async code => ({id: code === 'bob' ? '2002' : '1001', login: code === 'bob' ? 'bob' : 'fixture-user'})}, async base => {
+      const alice = await login(base);
+      const response = await completeLogin(base, await beginLogin(base), 'bob');
+      const bob = response.headers.get('set-cookie').match(/gridbase_session=[^;,]+/)[0];
+      assert.equal((await (await request(base, '/api/connections', alice)).json()).connections.length, 1);
+      const list = await (await request(base, '/api/connections', bob)).json();
+      assert.equal(list.connections.length, 0);
+      const health = await (await request(base, '/api/health', bob)).json();
+      assert.equal(health.configured, false); assert.equal(health.target, null);
+      for (const path of ['/api/databases', '/api/namespaces', '/api/tables', '/api/columns']) {
+        assert.equal((await request(base, path + '?connectionId=default', bob)).status, 404);
+        assert.equal((await request(base, path, bob)).status, 503);
+      }
+      assert.equal((await request(base, '/api/query', bob, {method: 'POST', headers: {'Content-Type': 'application/json'}, body: '{"connectionId":"default","sql":"SELECT 1"}'})).status, 404);
+      assert.equal((await request(base, '/api/connections', bob, {headers: {'X-GridBase-Account': '1001'}})).status, 409);
+    });
+    await withServer({environment: {...environment, LEGACY_CONNECTION_OWNER_ID: ''}, identify: async () => ({id: '1001', login: 'fixture-user'})}, async base => {
+      assert.equal((await (await request(base, '/api/connections', await login(base))).json()).connections.length, 0);
+    });
+  } finally { Object.assign(config, saved); }
+});
+
+test('legacy path suffixes cannot bypass the connection owner guard or invoke Beeline', async () => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'gridbase-beeline-owner-'));
+  const executable = path.join(directory, 'beeline-fixture'), marker = path.join(directory, 'executed');
+  fs.writeFileSync(executable, '#!/usr/bin/env node\n' +
+    `require('node:fs').appendFileSync(${JSON.stringify(marker)}, 'called\\n');\n` +
+    "process.stdout.write('namespace\\nprivate_database\\n'); process.stdin.resume();\n", {mode: 0o700});
+  const saved = {...config};
+  Object.assign(config, {beelineBin: executable, jdbcUrl: 'jdbc:hive2://private.fixture/default', username: 'fixture', password: 'fixture-secret'});
+  try {
+    await withServer({environment: {...environment, LEGACY_CONNECTION_OWNER_ID: '2002'},
+      identify: async () => ({id: '1001', login: 'fixture-user'})}, async base => {
+      const cookie = await login(base);
+      for (const suffix of ['-anything', '/extra', '%2Fextra']) {
+        for (const endpoint of ['/api/databases', '/api/namespaces']) {
+          const response = await request(base, endpoint + suffix, cookie);
+          assert.equal(response.status, 404, endpoint + suffix);
+          assert.equal(fs.existsSync(marker), false, 'Non-owner must never invoke Beeline');
+        }
+      }
+    });
+    await withServer({environment: {...environment, LEGACY_CONNECTION_OWNER_ID: '1001'},
+      identify: async () => ({id: '1001', login: 'fixture-user'})}, async base => {
+      const response = await request(base, '/api/databases', await login(base));
+      assert.equal(response.status, 200);
+      assert.equal(fs.existsSync(marker), true, 'Fixture must detect actual execution for the owner');
+    });
+  } finally { Object.assign(config, saved); fs.rmSync(directory, {recursive: true, force: true}); }
 });

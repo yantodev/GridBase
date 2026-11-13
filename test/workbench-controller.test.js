@@ -4,7 +4,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const vm = require('node:vm');
 const C = require('../public/workbench-core');
-function setup({configured=true,offline=false,storage=new Map(),connections}={}) {
+function setup({configured=true,offline=false,storage=new Map(),connections,accountId='1001'}={}) {
   let sources=(connections || (configured ? [{id:'default',name:'Spark Thrift / Hive',type:'hive'}] : [])).map(item=>({connected:true,...item}));
   const settings=new Map(sources.map(item=>[item.id,{...item,host:'fixture',port:item.type==='mysql'?'3306':'5432',database:'app',username:'fixture',password:'saved-secret',jdbcUrl:item.type==='hive'?'jdbc:hive2://fixture/app;token=saved-token':`jdbc:${item.type}://fixture/app`}]));
   let document;
@@ -50,7 +50,7 @@ function setup({configured=true,offline=false,storage=new Map(),connections}={})
   let queryResponse=null, connectResponse=null, metadataResponse=null, detailsResponse=null;
   const requests=[];
   const fixture=(count=23)=>({columns:['id','name'],rows:Array.from({length:count},(_,i)=>({id:String(i+1),name:i===0?null:'row '+(i+1)})),rowCount:count,durationMs:12,truncated:false,updateCount:null});
-  const context=vm.createContext({document,window:{WorkbenchCore:C,localStorage:{getItem:key=>storage.get(key)||null,setItem:(key,value)=>storage.set(key,value)},matchMedia:()=>({matches:false,addEventListener(){}}),clearTimeout(){},setTimeout(){},addEventListener(){},confirm:()=>true},fetch:async(url,options)=>{
+  const context=vm.createContext({document,window:{WorkbenchCore:C,GridBaseSession:{user:{id:accountId,login:'fixture-user'}},localStorage:{getItem:key=>storage.get(key)||null,setItem:(key,value)=>storage.set(key,value)},matchMedia:()=>({matches:false,addEventListener(){}}),clearTimeout(){},setTimeout(){},addEventListener(){},confirm:()=>true},fetch:async(url,options)=>{
     requests.push({url,options});if(offline)throw new Error('offline');
     let data;
     if(url==='/api/health')data={configured,target:'fixture.example'};
@@ -79,6 +79,19 @@ function setup({configured=true,offline=false,storage=new Map(),connections}={})
   return {context,nodes,storage,requests,fixture,settings,setDetails:value=>{detailsResponse=value;},setQuery:value=>{queryResponse=value;},setConnect:value=>{connectResponse=value;},setMetadata:value=>{metadataResponse=value;},get:id=>nodes.get('#'+id),read:code=>vm.runInContext(code,context)};
 }
 const flush=async()=>{for(let i=0;i<4;i++)await new Promise(setImmediate);};
+test('drafts, SQL history and cached connections are private to the verified account',async()=>{
+  const storage=new Map();
+  const alice=setup({configured:false,storage,accountId:'1001'});await flush();
+  alice.read("active().sql='SELECT alice_private'; state.history=[{sql:'SELECT alice_history',ranAt:123,rows:1}]; state.connectionProfiles=[{id:'alice-db',name:'Alice private',type:'postgresql'}]; persistDrafts(); saveHistory(); saveConnections();");
+  storage.set('gridbase:connections:v1',JSON.stringify([{id:'unowned',name:'Shared old cache',type:'mysql'}]));
+  const bob=setup({configured:false,storage,accountId:'2002'});await flush();
+  assert.doesNotMatch(bob.read('JSON.stringify(state)'),/alice_private|alice_history|Alice private|Shared old cache/);
+  bob.read("active().sql='SELECT bob_private'; persistDrafts();");
+  const restored=setup({offline:true,storage,accountId:'1001'});await flush();
+  assert.equal(restored.read('active().sql'),'SELECT alice_private');
+  assert.match(restored.read('JSON.stringify(state.history)'),/alice_history/);
+  assert.match(restored.read('JSON.stringify(state.connectionProfiles)'),/Alice private/);
+});
 test('explorer metadata, pagination, sorting/filtering, row detail and draft restoration',async()=>{
   const app=setup();await flush();
   assert.equal(app.get('connection-label').textContent,'Connected');
@@ -99,7 +112,7 @@ test('explorer metadata, pagination, sorting/filtering, row detail and draft res
   app.get('result-filter').value='none-match';await app.get('result-filter').emit('input');assert.equal(app.get('results-table-wrap').hidden,true);assert.match(app.get('result-state').children[1].textContent,/No matching/);
   app.get('result-filter').value='';await app.get('result-filter').emit('input');
   const firstSort=app.get('results-table-wrap').children[0].children[0].children[0].children[1].children[0];await firstSort.click();assert.equal(app.read('active().sort.column'),'id');
-  app.context.persistDrafts();const draft=app.storage.get('thrift-query-workbench:drafts:v1');assert.ok(draft.includes('table_1'));assert.ok(!draft.includes('rowCount'));
+  app.context.persistDrafts();const draft=app.storage.get('thrift-query-workbench:drafts:v1:github:1001');assert.ok(draft.includes('table_1'));assert.ok(!draft.includes('rowCount'));
   const reloaded=setup({storage:app.storage});await flush();assert.equal(reloaded.read('active().source.table'),'table_1');assert.equal(reloaded.read('active().result'),undefined);assert.equal(reloaded.get('console-context').textContent,'analytics / table_1');
 });
 test('in-flight results stay with their originating console and current statement selection works',async()=>{
@@ -142,7 +155,7 @@ test('SQL editing has a keyboard exit and cannot create an unrestorable oversize
   editor.value='x'.repeat(20000);editor.setSelectionRange(20000,20000);await editor.emit('input');
   await editor.emit('keydown',{key:'Tab'});assert.equal(editor.value.length,20000);assert.equal(app.read('active().sql.length'),20000);
   await editor.emit('keydown',{key:'Enter'});assert.equal(editor.value.length,20000);
-  app.context.persistDrafts();assert.equal(C.restoreDrafts(app.storage.get('thrift-query-workbench:drafts:v1')).tabs[0].sql.length,20000);
+  app.context.persistDrafts();assert.equal(C.restoreDrafts(app.storage.get('thrift-query-workbench:drafts:v1:github:1001')).tabs[0].sql.length,20000);
   await editor.emit('keydown',{key:'Escape'});assert.equal(app.get('format-query'),app.context.document.activeElement);
 });
 
@@ -204,7 +217,7 @@ test('adding from the left preserves existing consoles and saves no password or 
   assert.equal(app.read('state.connections.size'),2);
   assert.equal(app.read('state.tabs[0].connectionId'),'default');
   assert.equal(app.read('active().connectionId'),'added-1');
-  const saved=app.storage.get('gridbase:connections:v1');
+  const saved=app.storage.get('gridbase:connections:v1:github:1001');
   assert.ok(!saved.includes('sensitive-value'));assert.ok(!saved.includes('embedded-value'));assert.ok(!saved.includes('jdbcUrl'));
   assert.equal(app.get('connection-password').value,'');
   await app.context.disconnectConnection('added-1');
@@ -215,7 +228,7 @@ test('adding from the left preserves existing consoles and saves no password or 
 
 test('a restored console with a missing connection never falls back to another source',async()=>{
   const tab=C.newTab('Missing','DELETE FROM fixture');tab.connectionId='gone';
-  const storage=new Map([['thrift-query-workbench:drafts:v1',C.serializeDrafts({tabs:[tab],activeId:tab.id})]]);
+  const storage=new Map([['thrift-query-workbench:drafts:v1:github:1001',C.serializeDrafts({tabs:[tab],activeId:tab.id})]]);
   const app=setup({storage});await flush();
   assert.equal(app.read('active().connectionId'),'gone');assert.equal(app.get('run-query').disabled,true);
   await app.context.runQuery();assert.equal(app.requests.filter(r=>r.url==='/api/query').length,0);
@@ -317,7 +330,7 @@ test('late credential responses cannot overwrite another profile or repopulate a
 });
 
 test('old browser-only profiles request one-time credentials without silently creating a default',async()=>{
-  const storage=new Map([['gridbase:connections:v1',JSON.stringify([{id:'legacy',type:'hive',name:'Old connection',username:'fixture'}])]]);
+  const storage=new Map([['gridbase:connections:v1:github:1001',JSON.stringify([{id:'legacy',type:'hive',name:'Old connection',username:'fixture'}])]]);
   const app=setup({configured:false,storage});await flush();
   await app.context.openConnectionManager(app.read("state.connections.get('legacy')"));
   assert.match(app.get('connection-form-status').textContent,/Isi password dan JDBC URL sekali lagi/);

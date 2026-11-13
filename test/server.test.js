@@ -164,7 +164,7 @@ test('legacy backend exposes its default source and rejects foreign IDs before e
   const response={writeHead(status){this.status=status;},end(body){this.data=JSON.parse(body);}};
   await handleQuery(Readable.from([JSON.stringify({sql:'DELETE FROM fixture',connectionId:'other-source'})]),response,async()=>{executed=true;});
   assert.equal(response.status,404);assert.equal(executed,false);
-  const server=createServer({environment:{GITHUB_CLIENT_ID:'fixture',GITHUB_CLIENT_SECRET:'fixture'},identify:async()=> 'fixture-user'});await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
+  const server=createServer({environment:{GITHUB_CLIENT_ID:'fixture',GITHUB_CLIENT_SECRET:'fixture'},identify:async()=> ({id:'1001',login:'fixture-user'})});await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
   try {
     const base='http://127.0.0.1:'+server.address().port;
     const cookie=await require('./auth-helpers').login(base);

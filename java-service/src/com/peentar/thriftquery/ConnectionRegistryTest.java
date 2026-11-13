@@ -52,7 +52,7 @@ public final class ConnectionRegistryTest {
             expectMissing(() -> registry.require(first.id()));
             try { registry.require(""); throw new AssertionError("Missing default"); } catch (IllegalStateException expected) { }
             AppConfig env = AppConfig.load(root, Map.of("THRIFT_JDBC_URL", "jdbc:hive2://fixture/default", "THRIFT_USERNAME", "fixture", "THRIFT_PASSWORD", "fixture-secret"));
-            ConnectionRegistry defaults = new ConnectionRegistry(env);
+            ConnectionRegistry defaults = new ConnectionRegistry(env, "1001");
             check(defaults.defaultId() == null && defaults.entries().isEmpty(), "No startup source, even with old Spark environment settings");
             System.out.println("Multi-connection registry tests passed");
         } finally {

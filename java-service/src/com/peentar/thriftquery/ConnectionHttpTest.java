@@ -29,8 +29,9 @@ public final class ConnectionHttpTest {
         AppConfig config = AppConfig.load(root, Map.of("GITHUB_CLIENT_ID", "fixture-id", "GITHUB_CLIENT_SECRET", "fixture-secret"));
         List<String> executed = new ArrayList<>();
         ConnectionRegistry.ServiceFactory factory = profile -> new JdbcService(config, profile, () -> fixture(profile, executed));
-        ConnectionRegistry registry = new ConnectionRegistry(factory, new ConnectionStore(config.dataDir));
-        ThriftQueryServer server = new ThriftQueryServer(config, registry, new GitHubAuth(config.auth, (code, verifier) -> "fixture-user"));
+        ConnectionWorkspaces workspaces = new ConnectionWorkspaces(config, factory);
+        ConnectionRegistry registry = workspaces.forOwner("1001");
+        ThriftQueryServer server = new ThriftQueryServer(config, workspaces, new GitHubAuth(config.auth, (code, verifier) -> new GitHubAuth.User("1001", "fixture-user")));
         try {
             server.start(0);
             String base = "http://127.0.0.1:" + server.port();
@@ -96,8 +97,9 @@ public final class ConnectionHttpTest {
             check(get(base, "/api/connections/" + saved, 200).contains("fixture-secret"), "Offline save does not test the remote database");
             post(base, "/api/connections", profile("postgresql", "Updated offline", saved).replace("fixture-secret", "updated-secret"), 200);
             server.stop();
-            registry = new ConnectionRegistry(factory, new ConnectionStore(config.dataDir));
-            server = new ThriftQueryServer(config, registry, new GitHubAuth(config.auth, (code, verifier) -> "fixture-user")); server.start(0);
+            workspaces = new ConnectionWorkspaces(config, factory);
+            registry = workspaces.forOwner("1001");
+            server = new ThriftQueryServer(config, workspaces, new GitHubAuth(config.auth, (code, verifier) -> new GitHubAuth.User("1001", "fixture-user"))); server.start(0);
             base = "http://127.0.0.1:" + server.port();
             sessionCookie = GitHubAuthTest.login(base);
             check(get(base, "/api/connections", 200).contains("\"defaultConnectionId\":null"), "Restart has no implicit default");
@@ -107,7 +109,7 @@ public final class ConnectionHttpTest {
             post(base, "/api/query", "{\"connectionId\":\"" + saved + "\",\"sql\":\"DELETE FROM fixture\"}", 404);
             delete(base, "/api/connections/" + saved, 200);
             get(base, "/api/connections/" + saved, 404);
-            check(!new ConnectionStore(config.dataDir).load().containsKey(saved), "Deletion persists in SQLite");
+            check(!new ConnectionStore(config.dataDir, "1001").load().containsKey(saved), "Deletion persists in SQLite");
             System.out.println("Multi-connection HTTP tests passed (synthetic JDBC)");
         } finally {
             server.stop();
@@ -115,7 +117,7 @@ public final class ConnectionHttpTest {
         }
     }
 
-    private static Connection fixture(ConnectionProfile profile, List<String> executed) throws SQLException {
+    static Connection fixture(ConnectionProfile profile, List<String> executed) throws SQLException {
         if (profile.name().equals("broken")) throw new SQLException("fixture failure");
         String type = profile.type().id();
         DatabaseMetaData metadata = proxy(DatabaseMetaData.class, (p,m,a) -> switch (m.getName()) {

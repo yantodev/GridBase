@@ -16,6 +16,7 @@ services:
       GITHUB_CLIENT_ID: "${GITHUB_CLIENT_ID:-}"
       GITHUB_CLIENT_SECRET: "${GITHUB_CLIENT_SECRET:-}"
       GITHUB_ALLOWED_USERS: "${GITHUB_ALLOWED_USERS:-}"
+      LEGACY_CONNECTION_OWNER_ID: "${LEGACY_CONNECTION_OWNER_ID:-}"
     restart: unless-stopped
     volumes:
       - gridbase-data:/app/data

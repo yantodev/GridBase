@@ -21,7 +21,7 @@ public final class GitHubAuthTest {
         Files.writeString(root.resolve("public/login.html"), "login-page");
         Files.writeString(root.resolve("public/index.html"), "protected-workbench");
         AppConfig unconfigured = AppConfig.load(root, Map.of());
-        ThriftQueryServer server = new ThriftQueryServer(unconfigured, new ConnectionRegistry(unconfigured));
+        ThriftQueryServer server = new ThriftQueryServer(unconfigured, new ConnectionWorkspaces(unconfigured));
         try {
             server.start(0);
             String base = "http://127.0.0.1:" + server.port();
@@ -46,9 +46,10 @@ public final class GitHubAuthTest {
                 check(verifier.length() >= 43, "PKCE verifier has sufficient entropy");
                 if (expectedChallenge.get() != null) check(GitHubAuth.challenge(verifier).equals(expectedChallenge.get()), "Token exchange verifier must match the authorization challenge");
                 if (code.equals("failure")) throw new java.io.IOException("fixture provider failure");
-                return code.equals("outsider") ? "outsider" : "fixture-user";
+                if (code.equals("missing-id")) return new GitHubAuth.User(null, "fixture-user");
+                return new GitHubAuth.User("1001", code.equals("outsider") ? "outsider" : "fixture-user");
             }, now::get);
-            server = new ThriftQueryServer(config, new ConnectionRegistry(config), auth);
+            server = new ThriftQueryServer(config, new ConnectionWorkspaces(config), auth);
             server.start(0); base = "http://127.0.0.1:" + server.port();
             Flow first = begin(base);
             expectedChallenge.set(first.challenge());
@@ -64,7 +65,7 @@ public final class GitHubAuthTest {
             check(get(base, "/", session, 200).body().equals("protected-workbench"), "Valid session opens workbench");
             check(get(base, "/login", session, 303).headers().firstValue("Location").orElse("").equals("/"), "Signed-in user skips login");
             String identity = get(base, "/api/auth/session", session, 200).body();
-            check(identity.contains("fixture-user") && !identity.contains("fixture-secret"), "Session exposes only identity");
+            check(identity.contains("\"id\":\"1001\"") && identity.contains("fixture-user") && !identity.contains("fixture-secret"), "Session exposes only identity");
             get(base, "/api/connections", session, 200);
             check(get(base, callback(first.state(), "fixture"), first.cookie(), 303).headers().firstValue("Location").orElse("").contains("invalid_state"), "Callback cannot be replayed");
             send(base, "/api/query", "POST", session, "application/json", "https://untrusted.example", 403);
@@ -78,7 +79,7 @@ public final class GitHubAuthTest {
             get(base, "/api/connections", session, 401);
             get(base, "/api/connections", "gridbase_session=forged", 401);
 
-            for (String code : List.of("failure", "outsider", "")) {
+            for (String code : List.of("failure", "outsider", "missing-id", "")) {
                 Flow flow = begin(base);
                 HttpResponse<String> rejected = get(base, callback(flow.state(), code), flow.cookie(), 303);
                 check(rejected.headers().firstValue("Location").orElse("").contains(code.equals("outsider") ? "not_allowed" : "failed"), "Provider failures and allowlist denied");
@@ -93,7 +94,7 @@ public final class GitHubAuthTest {
             server.stop();
 
             AppConfig secureConfig = AppConfig.load(root, Map.of("APP_URL", "https://gridbase.example", "GITHUB_CLIENT_ID", "fixture", "GITHUB_CLIENT_SECRET", "fixture"));
-            server = new ThriftQueryServer(secureConfig, new ConnectionRegistry(secureConfig), new GitHubAuth(secureConfig.auth, (code, verifier) -> "fixture-user"));
+            server = new ThriftQueryServer(secureConfig, new ConnectionWorkspaces(secureConfig), new GitHubAuth(secureConfig.auth, (code, verifier) -> new GitHubAuth.User("1001", "fixture-user")));
             server.start(0); base = "http://127.0.0.1:" + server.port();
             Flow secureFlow = begin(base);
             check(get(base, callback(secureFlow.state(), "fixture"), secureFlow.cookie(), 303).headers().allValues("Set-Cookie").stream().allMatch(value -> value.contains("; Secure")), "HTTPS sets Secure on OAuth and session cookies");

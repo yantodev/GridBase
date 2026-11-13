@@ -1,9 +1,11 @@
 'use strict';
+const ACCOUNT_ID = window.GridBaseSession?.user?.id;
+if (typeof ACCOUNT_ID !== 'string' || !/^[1-9][0-9]{0,19}$/.test(ACCOUNT_ID)) throw new Error('Verified GitHub account required');
 const C = window.WorkbenchCore;
 const $ = selector => document.querySelector(selector);
-const HISTORY_STORAGE_KEY = 'thrift-query-workbench:history:v1';
-const DRAFT_STORAGE_KEY = 'thrift-query-workbench:drafts:v1';
-const CONNECTIONS_STORAGE_KEY = 'gridbase:connections:v1';
+const HISTORY_STORAGE_KEY = 'thrift-query-workbench:history:v1:github:' + ACCOUNT_ID;
+const DRAFT_STORAGE_KEY = 'thrift-query-workbench:drafts:v1:github:' + ACCOUNT_ID;
+const CONNECTIONS_STORAGE_KEY = 'gridbase:connections:v1:github:' + ACCOUNT_ID;
 const RESULTS_PAGE_SIZE = 10;
 const MAX_HISTORY_ITEMS = 5;
 function readStorage(key) { try { return window.localStorage.getItem(key); } catch { return null; } }

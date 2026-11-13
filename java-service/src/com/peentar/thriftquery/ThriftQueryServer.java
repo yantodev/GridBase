@@ -3,7 +3,6 @@ package com.peentar.thriftquery;
 import com.sun.net.httpserver.Headers;
 import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpServer;
-import com.sun.net.httpserver.HttpHandler;
 
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
@@ -27,22 +26,22 @@ public final class ThriftQueryServer {
     private static final int MAX_SQL_LENGTH = 20_000;
 
     private final AppConfig config;
-    private final ConnectionRegistry connections;
+    private final ConnectionWorkspaces workspaces;
     private final GitHubAuth auth;
     private final ExecutorService executor = Executors.newFixedThreadPool(8);
     private HttpServer server;
 
     private ThriftQueryServer(AppConfig config) {
-        this(config, new ConnectionRegistry(config));
+        this(config, new ConnectionWorkspaces(config));
     }
 
-    ThriftQueryServer(AppConfig config, ConnectionRegistry connections) {
-        this(config, connections, new GitHubAuth(config.auth));
+    ThriftQueryServer(AppConfig config, ConnectionWorkspaces workspaces) {
+        this(config, workspaces, new GitHubAuth(config.auth));
     }
 
-    ThriftQueryServer(AppConfig config, ConnectionRegistry connections, GitHubAuth auth) {
+    ThriftQueryServer(AppConfig config, ConnectionWorkspaces workspaces, GitHubAuth auth) {
         this.config = config;
-        this.connections = connections;
+        this.workspaces = workspaces;
         this.auth = auth;
     }
 
@@ -70,19 +69,30 @@ public final class ThriftQueryServer {
         route("/api/query", this::query);
         route("/api/databases", this::databases);
         route("/api/namespaces", this::namespaces);
-        route("/api/tables", exchange -> metadata(exchange, false));
-        route("/api/columns", exchange -> metadata(exchange, true));
+        route("/api/tables", (exchange, connections) -> metadata(exchange, connections, false));
+        route("/api/columns", (exchange, connections) -> metadata(exchange, connections, true));
         route("/", this::staticFiles);
         server.setExecutor(executor);
         server.start();
         System.out.println("GridBase (Java JDBC) running at http://" + config.host + ":" + port());
-        System.out.println("Configured database connections: " + connections.entries().size());
+        System.out.println("Database connections are private to each GitHub account.");
         if (!config.auth.configured()) System.out.println("GitHub login belum dikonfigurasi. Isi GITHUB_CLIENT_ID dan GITHUB_CLIENT_SECRET di .env.");
     }
 
-    private void route(String path, HttpHandler handler) {
+    private interface AccountHandler { void handle(HttpExchange exchange, ConnectionRegistry connections) throws IOException; }
+
+    private void route(String path, AccountHandler handler) {
         server.createContext(path, exchange -> {
-            if (!auth.handle(exchange)) handler.handle(exchange);
+            if (auth.handle(exchange)) return;
+            try {
+                GitHubAuth.User user = auth.user(exchange);
+                if (exchange.getRequestURI().getPath().startsWith("/api/") && user == null) {
+                    sendJson(exchange, 401, error("Silakan login dengan GitHub.")); return;
+                }
+                ConnectionRegistry connections = user != null && exchange.getRequestURI().getPath().startsWith("/api/")
+                        ? workspaces.forOwner(user.id()) : null;
+                handler.handle(exchange, connections);
+            } catch (ConnectionStore.StoreException unavailable) { sendJson(exchange, 503, error(unavailable.getMessage())); }
         });
     }
 
@@ -93,15 +103,15 @@ public final class ThriftQueryServer {
         executor.shutdownNow();
     }
 
-    private void health(HttpExchange exchange) throws IOException {
+    private void health(HttpExchange exchange, ConnectionRegistry connections) throws IOException {
         if (!"GET".equals(exchange.getRequestMethod())) {
             methodNotAllowed(exchange);
             return;
         }
-        sendJson(exchange, 200, healthPayload());
+        sendJson(exchange, 200, healthPayload(connections));
     }
 
-    private String healthPayload() {
+    private String healthPayload(ConnectionRegistry connections) {
         synchronized (connections) {
             ConnectionRegistry.Entry entry = connections.defaultEntry();
             ConnectionProfile profile = entry == null ? null : entry.service().profile();
@@ -115,12 +125,18 @@ public final class ThriftQueryServer {
         }
     }
 
-    private void testConnection(HttpExchange exchange) throws IOException {
+    private void testConnection(HttpExchange exchange, ConnectionRegistry connections) throws IOException {
         if (!"POST".equals(exchange.getRequestMethod())) { methodNotAllowed(exchange); return; }
         try {
-            ConnectionProfile candidate = ConnectionProfile.fromJson(readBody(exchange));
+            String body = readBody(exchange);
+            connections.checkWritable(JsonUtil.stringFieldOrDefault(body, "connectionId", ""));
+            ConnectionProfile candidate = ConnectionProfile.fromJson(body);
             connections.test(candidate);
             sendJson(exchange, 200, "{\"ok\":true,\"connection\":" + candidate.safeJson() + "}");
+        } catch (ConnectionRegistry.UnknownConnectionException error) {
+            sendJson(exchange, 404, error(error.getMessage()));
+        } catch (ConnectionStore.StoreException error) {
+            sendJson(exchange, 503, error(error.getMessage()));
         } catch (IllegalArgumentException error) {
             sendJson(exchange, 400, error(error.getMessage()));
         } catch (ClassNotFoundException error) {
@@ -134,24 +150,26 @@ public final class ThriftQueryServer {
         }
     }
 
-    private void connectionRoutes(HttpExchange exchange) throws IOException {
+    private void connectionRoutes(HttpExchange exchange, ConnectionRegistry connections) throws IOException {
         if ("POST".equals(exchange.getRequestMethod())) {
             switch (exchange.getRequestURI().getPath()) {
-                case "/api/connections/test" -> { testConnection(exchange); return; }
-                case "/api/connections/connect" -> { connect(exchange); return; }
-                case "/api/connections/disconnect" -> { disconnect(exchange); return; }
+                case "/api/connections/test" -> { testConnection(exchange, connections); return; }
+                case "/api/connections/connect" -> { connect(exchange, connections); return; }
+                case "/api/connections/disconnect" -> { disconnect(exchange, connections); return; }
             }
         }
-        listConnections(exchange);
+        listConnections(exchange, connections);
     }
 
-    private void connect(HttpExchange exchange) throws IOException {
+    private void connect(HttpExchange exchange, ConnectionRegistry connections) throws IOException {
         if (!"POST".equals(exchange.getRequestMethod())) { methodNotAllowed(exchange); return; }
         try {
             String body = readBody(exchange);
             ConnectionSettings candidate = ConnectionSettings.fromJson(body);
             ConnectionRegistry.Entry entry = connections.connect(JsonUtil.stringFieldOrDefault(body, "connectionId", ""), candidate);
             sendJson(exchange, 200, "{\"ok\":true,\"connection\":" + entry.toJson() + "}");
+        } catch (ConnectionRegistry.UnknownConnectionException error) {
+            sendJson(exchange, 404, error(error.getMessage()));
         } catch (IllegalArgumentException error) {
             sendJson(exchange, 400, error(error.getMessage()));
         } catch (ConnectionStore.StoreException error) {
@@ -167,7 +185,7 @@ public final class ThriftQueryServer {
         }
     }
 
-    private void disconnect(HttpExchange exchange) throws IOException {
+    private void disconnect(HttpExchange exchange, ConnectionRegistry connections) throws IOException {
         if (!"POST".equals(exchange.getRequestMethod())) { methodNotAllowed(exchange); return; }
         try {
             connections.disconnect(JsonUtil.stringField(readBody(exchange), "connectionId"));
@@ -179,7 +197,7 @@ public final class ThriftQueryServer {
         } finally { exchange.close(); }
     }
 
-    private void listConnections(HttpExchange exchange) throws IOException {
+    private void listConnections(HttpExchange exchange, ConnectionRegistry connections) throws IOException {
         String path = exchange.getRequestURI().getPath();
         String method = exchange.getRequestMethod();
         try {
@@ -213,7 +231,7 @@ public final class ThriftQueryServer {
         } finally { exchange.close(); }
     }
 
-    private void query(HttpExchange exchange) throws IOException {
+    private void query(HttpExchange exchange, ConnectionRegistry connections) throws IOException {
         if (!"POST".equals(exchange.getRequestMethod())) {
             methodNotAllowed(exchange);
             return;
@@ -247,16 +265,16 @@ public final class ThriftQueryServer {
         }
     }
 
-    private void databases(HttpExchange exchange) throws IOException {
-        databaseList(exchange, "databases", "Database");
+    private void databases(HttpExchange exchange, ConnectionRegistry connections) throws IOException {
+        databaseList(exchange, connections, "databases", "Database");
     }
 
     @Deprecated
-    private void namespaces(HttpExchange exchange) throws IOException {
-        databaseList(exchange, "namespaces", "Namespace");
+    private void namespaces(HttpExchange exchange, ConnectionRegistry connections) throws IOException {
+        databaseList(exchange, connections, "namespaces", "Namespace");
     }
 
-    private void databaseList(HttpExchange exchange, String responseField, String label) throws IOException {
+    private void databaseList(HttpExchange exchange, ConnectionRegistry connections, String responseField, String label) throws IOException {
         if (!"GET".equals(exchange.getRequestMethod())) {
             methodNotAllowed(exchange);
             return;
@@ -281,7 +299,7 @@ public final class ThriftQueryServer {
         }
     }
 
-    private void metadata(HttpExchange exchange, boolean columns) throws IOException {
+    private void metadata(HttpExchange exchange, ConnectionRegistry connections, boolean columns) throws IOException {
         if (!"GET".equals(exchange.getRequestMethod())) { methodNotAllowed(exchange); return; }
         try {
             Map<String, String> params = queryParams(exchange);
@@ -322,7 +340,7 @@ public final class ThriftQueryServer {
         return params;
     }
 
-    private void staticFiles(HttpExchange exchange) throws IOException {
+    private void staticFiles(HttpExchange exchange, ConnectionRegistry connections) throws IOException {
         if (!"GET".equals(exchange.getRequestMethod())) {
             methodNotAllowed(exchange);
             return;

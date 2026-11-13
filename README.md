@@ -44,9 +44,12 @@ Jika OAuth belum dikonfigurasi, aplikasi tetap terkunci.
    dengan `APP_URL`. Klik **Masuk dengan GitHub** untuk membuka workbench.
 
 `GITHUB_ALLOWED_USERS` bersifat opsional: daftar username GitHub dipisahkan koma, tanpa
-membedakan huruf besar/kecil. Jika kosong, semua akun GitHub dapat login. Workspace dan
-profil koneksi SQLite digunakan bersama oleh semua pengguna yang diizinkan, termasuk
-akses Edit ke kredensial tersimpan. Isi daftar tersebut untuk membatasi akses.
+membedakan huruf besar/kecil. Jika kosong, semua akun GitHub dapat login. Setiap akun
+hanya dapat melihat dan mengelola koneksi database miliknya, termasuk kredensial Edit,
+query, metadata, dan koneksi default. Pemilik memakai **ID numerik GitHub yang tetap**,
+sehingga perubahan username tidak memindahkan kepemilikan. Daftar izin login tetap memakai username.
+Draft SQL, riwayat, dan cache koneksi browser dipisahkan menurut ID akun; aplikasi baru
+memuat data setelah identitas sesi terverifikasi. Tab lama dimuat ulang jika akun berubah.
 
 Pada server, gunakan `APP_URL=https://domain-anda` dan callback
 `https://domain-anda/auth/github/callback` di OAuth App. `APP_URL` hanya berupa origin,
@@ -80,7 +83,7 @@ Implementasi ini mempertahankan branding GridBase dan tidak memakai aset JetBrai
 Klik **Add connection** di panel **Database sebelah kiri**. Pilih PostgreSQL, MySQL,
 atau Spark Thrift / Hive, isi detail koneksi, lalu gunakan **Save**, **Test connection**, atau **Connect**.
 Save menyimpan konfigurasi tanpa menghubungi database; Connect menguji dan menyimpan koneksi.
-Maksimal 20 koneksi dapat tersedia bersamaan. Nama boleh sama; setiap koneksi mempunyai ID sendiri.
+Maksimal 20 koneksi per akun dapat tersedia bersamaan. Nama boleh sama; setiap koneksi mempunyai ID sendiri.
 
 - Expand masing-masing data source untuk melihat schema, tabel, dan kolomnya.
 - Tombol console pada data source membuat tab SQL untuk koneksi tersebut. Membuka tabel juga
@@ -92,13 +95,13 @@ Maksimal 20 koneksi dapat tersedia bersamaan. Nama boleh sama; setiap koneksi me
 - **Edit** memuat konfigurasi tersimpan, termasuk password yang tetap ditampilkan sebagai karakter
   tertutup dan JDBC URL lengkap. Untuk PostgreSQL/MySQL, URL mengikuti host, port, database, dan SSL.
 - Konfigurasi tersimpan di `data/gridbase.sqlite`; seluruh detail dienkripsi AES-GCM menggunakan
-  kunci otomatis `data/credentials.key`. Keduanya dibutuhkan untuk backup/pemulihan. Folder data
+  kunci otomatis `data/credentials.key`; ciphertext juga terikat ke ID pemilik dan koneksi. Keduanya dibutuhkan untuk backup/pemulihan. Folder data
   dan driver lokal diabaikan Git dan Docker build. Jangan menghapus kunci ketika masih memakai database itu.
 - Setelah restart, profil dipulihkan dalam status disconnected tanpa koneksi default. Klik Connect
   untuk mengaktifkan koneksi lagi. Disconnect mempertahankan konfigurasi; ikon hapus menghapusnya dari server.
-- Profil lama yang hanya ada di browser belum memiliki password/JDBC tersimpan. Isi ulang sekali,
-  lalu Save atau Connect. Nilai yang sebelumnya tidak disimpan tidak bisa dipulihkan.
-- Akses aplikasi memberi akses ke kredensial melalui endpoint Edit. Gunakan workbench ini pada
+- Cache browser lama tanpa informasi pemilik tidak dimuat. Tambahkan kembali profil melalui akun
+  yang benar; password/JDBC URL yang tidak pernah disimpan di server perlu diisi ulang.
+- Pemilik koneksi dapat mengakses kredensialnya melalui endpoint Edit. Gunakan workbench ini pada
   lingkungan tepercaya; daftar koneksi dan health tidak mengembalikan password atau parameter JDBC rahasia.
 
 Image Docker sudah membawa driver JDBC PostgreSQL dan MySQL. Untuk menjalankan lokal, letakkan
@@ -115,6 +118,7 @@ APP_URL=http://127.0.0.1:4173
 GITHUB_CLIENT_ID=
 GITHUB_CLIENT_SECRET=
 GITHUB_ALLOWED_USERS=
+LEGACY_CONNECTION_OWNER_ID=
 ```
 
 Salin `.env.example` menjadi `.env` bila belum ada, lalu isi konfigurasi GitHub sesuai
@@ -126,6 +130,31 @@ Semua koneksi PostgreSQL, MySQL, dan Spark Thrift / Hive ditambahkan dari **Add 
 di panel Database. Kredensial Spark lama dari `.env` atau environment tidak membuat
 koneksi default di backend Java. Aplikasi mulai dengan daftar koneksi aktif kosong;
 profil SQLite tetap tersedia untuk Edit dan perlu dihubungkan kembali setelah restart server.
+
+### Migrasi profil koneksi lama
+
+Profil SQLite dari versi sebelum isolasi akun belum memiliki pemilik. Operator harus
+menentukan satu akun tujuan sebelum menjalankan versi baru:
+
+1. Hentikan seluruh instance aplikasi yang memakai volume data tersebut.
+2. Backup `data/gridbase.sqlite` dan `data/credentials.key` bersama-sama ke lokasi privat.
+   Untuk Docker, backup kedua file dari volume `gridbase-data`.
+3. Ambil ID numerik akun tujuan dari field `id` di `https://api.github.com/users/USERNAME`.
+   Isi `LEGACY_CONNECTION_OWNER_ID=ID_NUMERIK` di `.env` atau environment deployment.
+4. Jalankan aplikasi. Startup memindahkan semua profil tanpa pemilik ke ID tujuan dan
+   mengenkripsi ulang kredensial dalam satu transaksi. Profil milik akun lain tidak berubah;
+   migrasi berulang tidak memindahkan profil yang sudah memiliki pemilik.
+5. Login sebagai akun tujuan, lalu klik Connect pada profil yang akan dipakai.
+
+Tanpa `LEGACY_CONNECTION_OWNER_ID`, profil lama tetap tersimpan tetapi tidak terlihat
+oleh akun mana pun. Login pertama tidak dapat mengklaim data tersebut. Jika profil rusak,
+migrasi gagal tanpa memindahkan sebagian data. Konfigurasi ini dapat dikosongkan setelah
+migrasi selesai. Schema SQLite naik ke versi 2; untuk kembali ke aplikasi versi lama,
+hentikan versi baru lalu pulihkan database **dan** key dari backup sebelum upgrade.
+
+Backend Node legacy memakai `LEGACY_CONNECTION_OWNER_ID` untuk membatasi satu koneksi
+Beeline dari environment pada akun tersebut. Akun lain, atau konfigurasi owner kosong,
+tidak memperoleh akses. Pengelolaan multi koneksi memakai backend Java melalui `npm start`.
 
 Jika belum ada koneksi, status menunjukkan `Not configured` dan tombol query dinonaktifkan.
 Username dan password tidak dikembalikan oleh endpoint health.
@@ -192,6 +221,7 @@ Konfigurasi Docker yang tersedia:
 - `PORT` — port host untuk workbench, default `4173`.
 - `QUERY_TIMEOUT_MS` — batas waktu query, default `30000`.
 - `DEFAULT_QUERY_LIMIT` — batas hasil jika LIMIT tidak ditulis atau bernilai NULL, default `50`. LIMIT eksplisit pada SQL mengambil prioritas.
+- `LEGACY_CONNECTION_OWNER_ID` — ID numerik akun tujuan migrasi profil lama; kosong membuat profil tanpa pemilik tetap tersembunyi.
 - `APP_URL`, `GITHUB_CLIENT_ID`, `GITHUB_CLIENT_SECRET`, `GITHUB_ALLOWED_USERS` — konfigurasi login GitHub seperti dijelaskan di atas. Callback OAuth App harus sesuai dengan `APP_URL`.
 
 ## Perilaku query
@@ -206,7 +236,7 @@ Konfigurasi Docker yang tersedia:
   berlaku untuk hasil baca, bukan jumlah baris yang diubah atau dihapus.
   UI menampilkan status berhasil dan jumlah baris terdampak jika tersedia dari driver.
 - Hasil baca tidak disimpan oleh workbench; lima Recent queries
-  terakhir disimpan sebagai JSON di `localStorage` browser agar tetap tersedia
+  terakhir disimpan sebagai JSON di `localStorage` browser, terpisah per akun, agar tetap tersedia
   setelah reload.
 - Backend bind ke `127.0.0.1` secara default. Pada server bersama, gunakan reverse proxy
   HTTPS, isi `GITHUB_ALLOWED_USERS`, dan gunakan akun database dengan izin sesuai operasi
@@ -245,6 +275,10 @@ untuk pengelolaan koneksi melalui UI.
 Metadata memiliki batas terpisah 10.000 baris sehingga tidak terpotong oleh `DEFAULT_QUERY_LIMIT=50`. Identifier metadata di-escape dan divalidasi pada server.
 
 Endpoint database di atas memerlukan cookie `gridbase_session` dari login GitHub.
+ID koneksi milik akun lain menghasilkan `404` dan tidak menjalankan JDBC. Klien browser
+mengirim header `X-GridBase-Account` berisi ID sesi yang diharapkan; jika cookie sudah
+berpindah akun, server mengembalikan `409` sebelum menjalankan operasi. Header ini opsional
+untuk klien API dan tidak dapat memilih atau mengganti pemilik.
 Request mutasi harus berasal dari origin aplikasi; POST menggunakan JSON. Respons
 autentikasi, halaman workbench, dan API memakai `Cache-Control: no-store`.
 

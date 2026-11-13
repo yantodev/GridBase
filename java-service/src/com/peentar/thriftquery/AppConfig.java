@@ -14,8 +14,9 @@ public final class AppConfig {
     public final Path publicDir;
     public final Path dataDir;
     final AuthConfig auth;
+    final String legacyConnectionOwnerId;
 
-    private AppConfig(String host, int port, int timeoutSeconds, int defaultQueryLimit, Path publicDir, AuthConfig auth) {
+    private AppConfig(String host, int port, int timeoutSeconds, int defaultQueryLimit, Path publicDir, AuthConfig auth, String legacyConnectionOwnerId) {
         this.host = host;
         this.port = port;
         this.timeoutSeconds = timeoutSeconds;
@@ -23,6 +24,7 @@ public final class AppConfig {
         this.publicDir = publicDir;
         this.dataDir = publicDir.getParent().resolve("data");
         this.auth = auth;
+        this.legacyConnectionOwnerId = legacyConnectionOwnerId.isBlank() ? "" : GitHubAuth.validId(legacyConnectionOwnerId);
     }
 
     public static AppConfig load(Path projectRoot) {
@@ -41,7 +43,8 @@ public final class AppConfig {
                 new AuthConfig(value("APP_URL", environment, fileValues, "http://127.0.0.1:" + port),
                         value("GITHUB_CLIENT_ID", environment, fileValues, ""),
                         value("GITHUB_CLIENT_SECRET", environment, fileValues, ""),
-                        AuthConfig.users(value("GITHUB_ALLOWED_USERS", environment, fileValues, "")))
+                        AuthConfig.users(value("GITHUB_ALLOWED_USERS", environment, fileValues, ""))),
+                value("LEGACY_CONNECTION_OWNER_ID", environment, fileValues, "").trim()
         );
     }
 
