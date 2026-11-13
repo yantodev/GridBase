@@ -1,7 +1,7 @@
 openapi: 3.0.3
 info:
   title: GridBase API
-  version: 0.4.0
+  version: 1.0.0
   description: API for querying and changing data through Java JDBC, protected by GitHub OAuth sessions. All database endpoints require the HttpOnly session cookie. POST requests use application/json and mutations must originate from APP_URL. Connection profiles persist in a shared encrypted SQLite store with stable IDs. Startup restores profiles as disconnected, without an implicit default. Requests without an ID use the first connection added at runtime; an unknown explicit ID never falls back. Supported databases are Spark Thrift/Hive, PostgreSQL, and MySQL.
 servers:
   - url: http://127.0.0.1:4173

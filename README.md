@@ -4,9 +4,17 @@
   <img alt="Java" src="https://img.shields.io/badge/Java-ED8B00?logo=openjdk&logoColor=white" />
   <img alt="Apache Spark" src="https://img.shields.io/badge/Apache%20Spark-E25A1C?logo=apachespark&logoColor=white" />
   <img alt="Hive JDBC" src="https://img.shields.io/badge/Hive%20JDBC-FDEE21?logo=apache&logoColor=black" />
+  <img alt="PostgreSQL" src="https://img.shields.io/badge/PostgreSQL-4169E1?logo=postgresql&logoColor=white" />
+  <img alt="MySQL" src="https://img.shields.io/badge/MySQL-4479A1?logo=mysql&logoColor=white" />
+  <img alt="SQLite" src="https://img.shields.io/badge/SQLite-003B57?logo=sqlite&logoColor=white" />
   <img alt="Node.js" src="https://img.shields.io/badge/Node.js-339933?logo=nodedotjs&logoColor=white" />
   <img alt="JavaScript" src="https://img.shields.io/badge/JavaScript-F7DF1E?logo=javascript&logoColor=black" />
   <img alt="HTML/CSS" src="https://img.shields.io/badge/HTML%2FCSS-E34F26?logo=html5&logoColor=white" />
+  <img alt="Bash" src="https://img.shields.io/badge/Bash-4EAA25?logo=gnubash&logoColor=white" />
+  <img alt="GitHub OAuth" src="https://img.shields.io/badge/GitHub%20OAuth-181717?logo=github&logoColor=white" />
+  <img alt="Docker" src="https://img.shields.io/badge/Docker-2496ED?logo=docker&logoColor=white" />
+  <img alt="Docker Compose" src="https://img.shields.io/badge/Docker%20Compose-2496ED?logo=docker&logoColor=white" />
+  <img alt="OpenAPI" src="https://img.shields.io/badge/OpenAPI-6BA539?logo=openapiinitiative&logoColor=white" />
 </p>
 
 GUI lokal untuk membaca, membuat, memperbarui, dan menghapus data melalui JDBC langsung dari Java.
@@ -241,6 +249,10 @@ Request mutasi harus berasal dari origin aplikasi; POST menggunakan JSON. Respon
 autentikasi, halaman workbench, dan API memakai `Cache-Control: no-store`.
 
 ## Pengembangan
+
+Versi aplikasi tersimpan di [`VERSION`](./VERSION). Panduan Semantic Versioning,
+perintah bump versi, dan alur penerbitan release tersedia di
+[`VERSIONING.md`](./VERSIONING.md).
 
 ```bash
 npm test

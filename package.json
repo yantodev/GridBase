@@ -1,13 +1,18 @@
 {
   "name": "gridbase",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "private": true,
-  "description": "GridBase: a local SQL workbench for Spark Thrift Server.",
+  "description": "GridBase: a SQL workbench for Spark Thrift/Hive, PostgreSQL, and MySQL.",
   "type": "commonjs",
   "scripts": {
     "start": "bash run-java.sh",
     "start:node-legacy": "node server.js --legacy",
-    "test": "node test/query-utils.test.js && node test/metadata.test.js && node test/workbench-core.test.js && node test/workbench-controller.test.js && node test/server.test.js && node test/github-auth.test.js && node test/session.test.js && bash test-java.sh",
-    "check": "node --check server.js && node --check src/github-auth.js && node --check src/query-utils.js && node --check src/metadata.js && node --check public/workbench-core.js && node --check public/app.js && node --check public/login.js && node --check public/session.js && bash run-java.sh --check"
+    "version:check": "node scripts/version.js --check",
+    "version:patch": "node scripts/version.js patch",
+    "version:minor": "node scripts/version.js minor",
+    "version:major": "node scripts/version.js major",
+    "version:set": "node scripts/version.js",
+    "test": "npm run version:check && node test/version.test.js && node test/query-utils.test.js && node test/metadata.test.js && node test/workbench-core.test.js && node test/workbench-controller.test.js && node test/server.test.js && node test/github-auth.test.js && node test/session.test.js && bash test-java.sh",
+    "check": "npm run version:check && node --check scripts/version.js && node --check server.js && node --check src/github-auth.js && node --check src/query-utils.js && node --check src/metadata.js && node --check public/workbench-core.js && node --check public/app.js && node --check public/login.js && node --check public/session.js && bash run-java.sh --check"
   }
 }
