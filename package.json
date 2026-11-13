@@ -7,7 +7,7 @@
   "scripts": {
     "start": "bash run-java.sh",
     "start:node-legacy": "node server.js --legacy",
-    "test": "node test/query-utils.test.js && node test/metadata.test.js && node test/workbench-core.test.js && node test/workbench-controller.test.js && node test/server.test.js && bash test-java.sh",
-    "check": "node --check server.js && node --check src/query-utils.js && node --check src/metadata.js && node --check public/workbench-core.js && node --check public/app.js && bash run-java.sh --check"
+    "test": "node test/query-utils.test.js && node test/metadata.test.js && node test/workbench-core.test.js && node test/workbench-controller.test.js && node test/server.test.js && node test/github-auth.test.js && node test/session.test.js && bash test-java.sh",
+    "check": "node --check server.js && node --check src/github-auth.js && node --check src/query-utils.js && node --check src/metadata.js && node --check public/workbench-core.js && node --check public/app.js && node --check public/login.js && node --check public/session.js && bash run-java.sh --check"
   }
 }

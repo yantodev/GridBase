@@ -14,6 +14,45 @@ Connection manager bergaya DataGrip mendukung Spark Thrift / Hive, PostgreSQL, d
 Konfigurasi, termasuk password dan JDBC URL, disimpan terenkripsi di SQLite pada server.
 Browser tidak menyimpan kedua nilai tersebut di localStorage.
 
+## Login GitHub wajib
+
+Workbench dan seluruh API database memerlukan login GitHub. Membuka aplikasi tanpa sesi
+akan mengarahkan pengguna ke `/login`; request API tanpa sesi mengembalikan `401`.
+Jika OAuth belum dikonfigurasi, aplikasi tetap terkunci.
+
+1. Buat **OAuth App** di [GitHub Developer Settings](https://github.com/settings/developers).
+2. Untuk lokal, isi **Homepage URL** dengan `http://127.0.0.1:4173` dan
+   **Authorization callback URL** dengan `http://127.0.0.1:4173/auth/github/callback`.
+3. Salin Client ID dan Client Secret ke `.env` (jangan commit atau memasukkan secret ke browser):
+
+   ```dotenv
+   APP_URL=http://127.0.0.1:4173
+   GITHUB_CLIENT_ID=client-id-dari-github
+   GITHUB_CLIENT_SECRET=client-secret-dari-github
+   GITHUB_ALLOWED_USERS=username-anda
+   ```
+
+4. Jalankan ulang `npm start` atau buat ulang container Compose, lalu buka URL yang sama
+   dengan `APP_URL`. Klik **Masuk dengan GitHub** untuk membuka workbench.
+
+`GITHUB_ALLOWED_USERS` bersifat opsional: daftar username GitHub dipisahkan koma, tanpa
+membedakan huruf besar/kecil. Jika kosong, semua akun GitHub dapat login. Workspace dan
+profil koneksi SQLite digunakan bersama oleh semua pengguna yang diizinkan, termasuk
+akses Edit ke kredensial tersimpan. Isi daftar tersebut untuk membatasi akses.
+
+Pada server, gunakan `APP_URL=https://domain-anda` dan callback
+`https://domain-anda/auth/github/callback` di OAuth App. `APP_URL` hanya berupa origin,
+tanpa subpath; HTTP hanya diterima untuk loopback lokal. Reverse proxy perlu meneruskan
+request pada domain tersebut ke aplikasi. Jika mengganti port host, ubah `APP_URL` dan
+callback GitHub agar sesuai. Environment proses mengalahkan nilai `.env`.
+
+Login memakai OAuth state, PKCE S256, dan cookie HttpOnly dengan SameSite=Lax (Secure
+pada HTTPS). Token GitHub hanya dipakai di server untuk membaca identitas publik lalu
+dibuang; izin repository tidak diminta. Sesi bertahan maksimal 8 jam dan disimpan dalam
+memori satu instance: restart server mengharuskan login ulang. Tombol **Keluar** mencabut
+sesi di server. Profil database, draft SQL, dan history tetap mengikuti penyimpanan
+workbench yang sudah ada; login GitHub tidak memisahkan data per pengguna.
+
 ## Workspace bergaya DataGrip
 
 Tema dark dengan alur inti yang mengacu pada [query consoles dan query output DataGrip](https://www.jetbrains.com/help/datagrip/services-tool-window.html):
@@ -58,18 +97,22 @@ Image Docker sudah membawa driver JDBC PostgreSQL dan MySQL. Untuk menjalankan l
 driver tambahan di folder `drivers/` atau set `JDBC_DRIVER_DIR` ke folder yang berisi
 `postgresql-*.jar` dan `mysql-connector-j-*.jar`.
 
-File `.env` hanya berisi pengaturan aplikasi:
+File `.env` berisi pengaturan aplikasi dan OAuth GitHub:
 
 ```dotenv
 PORT=4173
 QUERY_TIMEOUT_MS=30000
 DEFAULT_QUERY_LIMIT=50
+APP_URL=http://127.0.0.1:4173
+GITHUB_CLIENT_ID=
+GITHUB_CLIENT_SECRET=
+GITHUB_ALLOWED_USERS=
 ```
 
-Salin `.env.example` menjadi `.env` bila belum ada. Nilai environment proses untuk tiga
-pengaturan ini memiliki prioritas lebih tinggi. File `.env` diabaikan Git dan tidak
-masuk Docker image. Compose meneruskan timeout dan limit serta menggunakan `PORT`
-sebagai port akses di host.
+Salin `.env.example` menjadi `.env` bila belum ada, lalu isi konfigurasi GitHub sesuai
+bagian login di atas. Nilai environment proses memiliki prioritas lebih tinggi. File
+`.env` diabaikan Git dan tidak masuk Docker image. Compose meneruskan timeout, limit,
+dan konfigurasi OAuth serta menggunakan `PORT` sebagai port akses di host.
 
 Semua koneksi PostgreSQL, MySQL, dan Spark Thrift / Hive ditambahkan dari **Add connection**
 di panel Database. Kredensial Spark lama dari `.env` atau environment tidak membuat
@@ -132,7 +175,7 @@ Perintah Spark yang tersedia di dalam container antara lain `spark-submit`,
 Untuk menggunakan port host lain:
 
 ```bash
-PORT=8080 docker compose up --build -d
+PORT=8080 APP_URL=http://127.0.0.1:8080 docker compose up --build -d
 ```
 
 Hentikan container dengan:
@@ -141,13 +184,14 @@ Hentikan container dengan:
 docker compose down
 ```
 
-Buka <http://127.0.0.1:4173> untuk langsung menggunakan workspace.
+Buka <http://127.0.0.1:4173> dan login dengan GitHub sebelum menggunakan workspace.
 
 Konfigurasi Docker yang tersedia:
 
 - `PORT` — port host untuk workbench, default `4173`.
 - `QUERY_TIMEOUT_MS` — batas waktu query, default `30000`.
 - `DEFAULT_QUERY_LIMIT` — batas hasil jika LIMIT tidak ditulis atau bernilai NULL, default `50`. LIMIT eksplisit pada SQL mengambil prioritas.
+- `APP_URL`, `GITHUB_CLIENT_ID`, `GITHUB_CLIENT_SECRET`, `GITHUB_ALLOWED_USERS` — konfigurasi login GitHub seperti dijelaskan di atas. Callback OAuth App harus sesuai dengan `APP_URL`.
 
 ## Perilaku query
 
@@ -163,15 +207,20 @@ Konfigurasi Docker yang tersedia:
 - Hasil baca tidak disimpan oleh workbench; lima Recent queries
   terakhir disimpan sebagai JSON di `localStorage` browser agar tetap tersedia
   setelah reload.
-- Backend bind ke `127.0.0.1` secara default. Jika dipasang di server bersama,
-  letakkan di belakang autentikasi/reverse proxy dan gunakan akun database
-  dengan izin sesuai operasi yang dibutuhkan.
+- Backend bind ke `127.0.0.1` secara default. Pada server bersama, gunakan reverse proxy
+  HTTPS, isi `GITHUB_ALLOWED_USERS`, dan gunakan akun database dengan izin sesuai operasi
+  yang dibutuhkan. Seluruh API database memerlukan sesi login GitHub.
 - SQL dikirim langsung ke `java.sql.Statement`; tidak ada shell atau proses CLI.
 
 ## Endpoint
 
 Kontrak API tersedia di [`openapi.yaml`](./openapi.yaml):
 
+- `GET /login` — halaman login; pengguna dengan sesi valid diarahkan ke workspace.
+- `GET /auth/github` dan `GET /auth/github/callback` — mulai dan selesaikan OAuth GitHub.
+- `GET /api/auth/session` — status konfigurasi login dan identitas sesi; dapat diakses tanpa login, tanpa secret.
+- `POST /auth/logout` — cabut sesi; gunakan `Content-Type: application/json` dan body `{}`.
+- `GET /healthz` — liveness publik minimal untuk Docker, tanpa metadata database.
 - `GET /api/health` — status konfigurasi tanpa mengembalikan secret.
 - `POST /api/connections/test` — menguji detail JDBC tanpa mengaktifkannya.
 - `GET /api/connections` — daftar koneksi dengan ID stabil dan metadata tanpa secret.
@@ -194,12 +243,21 @@ untuk pengelolaan koneksi melalui UI.
 
 Metadata memiliki batas terpisah 10.000 baris sehingga tidak terpotong oleh `DEFAULT_QUERY_LIMIT=50`. Identifier metadata di-escape dan divalidasi pada server.
 
+Endpoint database di atas memerlukan cookie `gridbase_session` dari login GitHub.
+Request mutasi harus berasal dari origin aplikasi; POST menggunakan JSON. Respons
+autentikasi, halaman workbench, dan API memakai `Cache-Control: no-store`.
+
 ## Pengembangan
 
 ```bash
 npm test
 npm run check
 ```
+
+Jika instalasi Spark berada di lokasi lain, set `SPARK_HOME` untuk kedua perintah.
+Pengujian autentikasi Java dan Node memakai HTTP lokal dengan penyedia identitas tiruan;
+tidak membutuhkan OAuth App atau menghubungi GitHub. Login langsung ke GitHub memerlukan
+Client ID/Secret yang valid dan callback terdaftar.
 
 `npm start` sekarang menjalankan backend Java JDBC. `node server.js` hanya
 tersisa sebagai backend Node legacy dan tidak digunakan oleh jalur utama.

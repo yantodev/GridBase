@@ -1,11 +1,66 @@
 openapi: 3.0.3
 info:
   title: GridBase API
-  version: 0.3.0
-  description: Local API for querying and changing data through Java JDBC. Connection profiles persist in an encrypted SQLite store with stable IDs. Startup restores profiles as disconnected, without an implicit default; .env contains only server settings. Requests without an ID use the first connection added at runtime; an unknown explicit ID never falls back. Disconnecting the default clears the implicit target until another connect, without redirecting to other existing connections. Supported databases are Spark Thrift/Hive, PostgreSQL, and MySQL.
+  version: 0.4.0
+  description: API for querying and changing data through Java JDBC, protected by GitHub OAuth sessions. All database endpoints require the HttpOnly session cookie. POST requests use application/json and mutations must originate from APP_URL. Connection profiles persist in a shared encrypted SQLite store with stable IDs. Startup restores profiles as disconnected, without an implicit default. Requests without an ID use the first connection added at runtime; an unknown explicit ID never falls back. Supported databases are Spark Thrift/Hive, PostgreSQL, and MySQL.
 servers:
-  - url: http://localhost:4173
+  - url: http://127.0.0.1:4173
+security:
+  - sessionCookie: []
 paths:
+  /api/auth/session:
+    get:
+      security: []
+      summary: Return login availability and current GitHub identity without secrets
+      responses:
+        '200':
+          description: Authentication status, also available when signed out
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [authenticated, configured, user]
+                properties:
+                  authenticated: { type: boolean }
+                  configured: { type: boolean }
+                  user:
+                    type: object
+                    nullable: true
+                    properties:
+                      login: { type: string }
+  /auth/github:
+    get:
+      security: []
+      summary: Begin GitHub OAuth with state and PKCE S256
+      responses:
+        '303': { description: Redirect to GitHub, the workspace, or login with a configuration error }
+  /auth/github/callback:
+    get:
+      security: []
+      summary: Verify OAuth state, exchange code, and issue an eight-hour session cookie
+      parameters:
+        - { in: query, name: state, schema: { type: string } }
+        - { in: query, name: code, schema: { type: string } }
+        - { in: query, name: error, schema: { type: string } }
+      responses:
+        '303': { description: Redirect to workspace on success, otherwise login with a fixed error code }
+  /auth/logout:
+    post:
+      summary: Revoke the current session and clear its cookie
+      requestBody:
+        content:
+          application/json:
+            schema: { type: object }
+      responses:
+        '200': { description: Signed out }
+        '401': { description: Session missing or expired }
+        '403': { description: Origin or content type rejected }
+  /healthz:
+    get:
+      security: []
+      summary: Public liveness probe without database information
+      responses:
+        '200': { description: Server is running }
   /api/health:
     get:
       summary: Return non-sensitive connection metadata
@@ -253,6 +308,12 @@ paths:
         '504':
           description: Database lookup timed out
 components:
+  securitySchemes:
+    sessionCookie:
+      type: apiKey
+      in: cookie
+      name: gridbase_session
+      description: Opaque HttpOnly SameSite=Lax cookie created by GitHub OAuth. Secure on HTTPS. Database endpoints return 401 when missing or expired. Sessions are shared-workspace access and expire after eight hours or a server restart.
   parameters:
     ConnectionId:
       in: query

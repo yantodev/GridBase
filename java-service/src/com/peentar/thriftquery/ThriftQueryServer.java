@@ -3,6 +3,7 @@ package com.peentar.thriftquery;
 import com.sun.net.httpserver.Headers;
 import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpServer;
+import com.sun.net.httpserver.HttpHandler;
 
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
@@ -27,6 +28,7 @@ public final class ThriftQueryServer {
 
     private final AppConfig config;
     private final ConnectionRegistry connections;
+    private final GitHubAuth auth;
     private final ExecutorService executor = Executors.newFixedThreadPool(8);
     private HttpServer server;
 
@@ -35,8 +37,13 @@ public final class ThriftQueryServer {
     }
 
     ThriftQueryServer(AppConfig config, ConnectionRegistry connections) {
+        this(config, connections, new GitHubAuth(config.auth));
+    }
+
+    ThriftQueryServer(AppConfig config, ConnectionRegistry connections, GitHubAuth auth) {
         this.config = config;
         this.connections = connections;
+        this.auth = auth;
     }
 
     public static void main(String[] args) throws Exception {
@@ -58,18 +65,25 @@ public final class ThriftQueryServer {
 
     void start(int port) throws IOException {
         server = HttpServer.create(new InetSocketAddress(config.host, port), 0);
-        server.createContext("/api/health", this::health);
-        server.createContext("/api/connections", this::connectionRoutes);
-        server.createContext("/api/query", this::query);
-        server.createContext("/api/databases", this::databases);
-        server.createContext("/api/namespaces", this::namespaces);
-        server.createContext("/api/tables", exchange -> metadata(exchange, false));
-        server.createContext("/api/columns", exchange -> metadata(exchange, true));
-        server.createContext("/", this::staticFiles);
+        route("/api/health", this::health);
+        route("/api/connections", this::connectionRoutes);
+        route("/api/query", this::query);
+        route("/api/databases", this::databases);
+        route("/api/namespaces", this::namespaces);
+        route("/api/tables", exchange -> metadata(exchange, false));
+        route("/api/columns", exchange -> metadata(exchange, true));
+        route("/", this::staticFiles);
         server.setExecutor(executor);
         server.start();
         System.out.println("GridBase (Java JDBC) running at http://" + config.host + ":" + port());
         System.out.println("Configured database connections: " + connections.entries().size());
+        if (!config.auth.configured()) System.out.println("GitHub login belum dikonfigurasi. Isi GITHUB_CLIENT_ID dan GITHUB_CLIENT_SECRET di .env.");
+    }
+
+    private void route(String path, HttpHandler handler) {
+        server.createContext(path, exchange -> {
+            if (!auth.handle(exchange)) handler.handle(exchange);
+        });
     }
 
     int port() { return server.getAddress().getPort(); }
@@ -315,6 +329,7 @@ public final class ThriftQueryServer {
         }
         String requestedPath = exchange.getRequestURI().getPath();
         if (requestedPath == null || requestedPath.equals("/")) requestedPath = "/index.html";
+        if (requestedPath.equals("/login")) requestedPath = "/login.html";
         Path file = config.publicDir.resolve("." + requestedPath).normalize();
         if (!file.startsWith(config.publicDir)) {
             sendJson(exchange, 403, error("Akses ditolak."));
@@ -328,7 +343,7 @@ public final class ThriftQueryServer {
         Headers headers = exchange.getResponseHeaders();
         applySecurityHeaders(headers);
         headers.set("Content-Type", contentType(file));
-        headers.set("Cache-Control", "no-cache");
+        headers.set("Cache-Control", "no-store");
         exchange.sendResponseHeaders(200, content.length);
         try (var output = exchange.getResponseBody()) {
             output.write(content);
@@ -353,7 +368,7 @@ public final class ThriftQueryServer {
         }
     }
 
-    private static void sendJson(HttpExchange exchange, int status, String body) throws IOException {
+    static void sendJson(HttpExchange exchange, int status, String body) throws IOException {
         byte[] bytes = body.getBytes(StandardCharsets.UTF_8);
         Headers headers = exchange.getResponseHeaders();
         applySecurityHeaders(headers);
@@ -382,7 +397,7 @@ public final class ThriftQueryServer {
         return operation + " gagal: " + detail;
     }
 
-    private static void applySecurityHeaders(Headers headers) {
+    static void applySecurityHeaders(Headers headers) {
         headers.set("Content-Security-Policy", "default-src 'self'; connect-src 'self'; img-src 'self' data:; style-src 'self'; script-src 'self'; base-uri 'none'; frame-ancestors 'none'");
         headers.set("Referrer-Policy", "no-referrer");
         headers.set("X-Content-Type-Options", "nosniff");

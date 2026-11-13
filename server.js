@@ -3,6 +3,7 @@ const fs = require("node:fs");
 const path = require("node:path");
 const os = require("node:os");
 const { spawn } = require("node:child_process");
+const { createAuth } = require("./src/github-auth");
 
 const {
   extractDatabases,
@@ -23,7 +24,7 @@ function loadDotEnv(filePath = path.join(ROOT, ".env"), environment = process.en
   const lines = fs.readFileSync(filePath, "utf8").split(/\r?\n/);
   for (const line of lines) {
     const match = line.match(/^\s*([A-Z][A-Z0-9_]*)\s*=\s*(.*)\s*$/);
-    if (!match || !["PORT", "QUERY_TIMEOUT_MS", "DEFAULT_QUERY_LIMIT"].includes(match[1]) || environment[match[1]]?.trim()) continue;
+    if (!match || !["PORT", "QUERY_TIMEOUT_MS", "DEFAULT_QUERY_LIMIT", "APP_URL", "GITHUB_CLIENT_ID", "GITHUB_CLIENT_SECRET", "GITHUB_ALLOWED_USERS"].includes(match[1]) || environment[match[1]]?.trim()) continue;
     const rawValue = match[2].trim();
     const quoted = (rawValue.startsWith('"') && rawValue.endsWith('"')) || (rawValue.startsWith("'") && rawValue.endsWith("'"));
     environment[match[1]] = quoted && rawValue.length >= 2 ? rawValue.slice(1, -1) : rawValue;
@@ -358,7 +359,7 @@ function serveStatic(request, response) {
     sendJson(response, 400, { error: "Path tidak valid." });
     return;
   }
-  const relativePath = pathname === "/" ? "/index.html" : pathname;
+  const relativePath = pathname === "/" ? "/index.html" : pathname === "/login" ? "/login.html" : pathname;
   const filePath = path.resolve(PUBLIC_DIR, `.${relativePath}`);
   if (!filePath.startsWith(`${PUBLIC_DIR}${path.sep}`)) {
     sendJson(response, 403, { error: "Akses ditolak." });
@@ -372,15 +373,17 @@ function serveStatic(request, response) {
     response.writeHead(200, {
       ...securityHeaders(),
       "Content-Type": MIME_TYPES[path.extname(filePath)] || "application/octet-stream",
-      "Cache-Control": "no-cache",
+      "Cache-Control": "no-store",
     });
     response.end(content);
   });
 }
 
-function createServer() {
+function createServer(options = {}) {
+  const auth = createAuth(options.environment || process.env, {sendJson, securityHeaders, identify: options.identify, now: options.now});
   return http.createServer(async (request, response) => {
     const url = new URL(request.url, "http://localhost");
+    if (await auth(request, response, url)) return;
     if (request.method === "GET" && url.pathname === "/api/connections") {
       const health = getHealth();
       sendJson(response, 200, { defaultConnectionId: health.configured ? "default" : null,

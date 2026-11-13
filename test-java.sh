@@ -21,6 +21,7 @@ java -ea --add-modules jdk.httpserver -cp "$TEST_CLASSPATH" com.peentar.thriftqu
 java -ea --add-modules jdk.httpserver -cp "$TEST_CLASSPATH" com.peentar.thriftquery.ConnectionRegistryTest
 java -ea --add-modules jdk.httpserver -cp "$TEST_CLASSPATH" com.peentar.thriftquery.ConnectionStoreTest
 java -ea --add-modules jdk.httpserver -cp "$TEST_CLASSPATH" com.peentar.thriftquery.ConnectionHttpTest
+java -ea --add-modules jdk.httpserver -cp "$TEST_CLASSPATH" com.peentar.thriftquery.GitHubAuthTest
 java -ea --add-modules jdk.httpserver -cp "$TEST_CLASSPATH" com.peentar.thriftquery.JdbcServiceTest
 java -ea --add-modules jdk.httpserver -cp "$TEST_CLASSPATH" com.peentar.thriftquery.JdbcMetadataTest
 java --add-modules jdk.httpserver -cp "$BUILD_DIR:$SPARK_ROOT/jars/*" com.peentar.thriftquery.JdbcDriverTest

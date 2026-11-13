@@ -62,6 +62,6 @@ EXPOSE 4173
 VOLUME ["/app/data"]
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
-    CMD curl --fail --silent http://127.0.0.1:4173/api/health > /dev/null || exit 1
+    CMD curl --fail --silent http://127.0.0.1:4173/healthz > /dev/null || exit 1
 
 ENTRYPOINT ["java", "--add-modules", "jdk.httpserver", "-cp", "/app/build/java:/opt/spark/jars/*:/opt/gridbase/drivers/*", "com.peentar.thriftquery.ThriftQueryServer"]

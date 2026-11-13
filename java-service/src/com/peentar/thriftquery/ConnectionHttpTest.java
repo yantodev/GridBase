@@ -22,17 +22,19 @@ import java.util.Map;
 /** Real HTTP routes with synthetic JDBC connections: no external database or credentials. */
 public final class ConnectionHttpTest {
     private static final HttpClient CLIENT = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(5)).build();
+    private static String sessionCookie;
 
     public static void main(String[] args) throws Exception {
         Path root = Files.createTempDirectory("gridbase-http");
-        AppConfig config = AppConfig.load(root, Map.of());
+        AppConfig config = AppConfig.load(root, Map.of("GITHUB_CLIENT_ID", "fixture-id", "GITHUB_CLIENT_SECRET", "fixture-secret"));
         List<String> executed = new ArrayList<>();
         ConnectionRegistry.ServiceFactory factory = profile -> new JdbcService(config, profile, () -> fixture(profile, executed));
         ConnectionRegistry registry = new ConnectionRegistry(factory, new ConnectionStore(config.dataDir));
-        ThriftQueryServer server = new ThriftQueryServer(config, registry);
+        ThriftQueryServer server = new ThriftQueryServer(config, registry, new GitHubAuth(config.auth, (code, verifier) -> "fixture-user"));
         try {
             server.start(0);
             String base = "http://127.0.0.1:" + server.port();
+            sessionCookie = GitHubAuthTest.login(base);
             check(get(base, "/api/connections", 200).contains("\"connections\":[]"), "Initially empty");
             post(base, "/api/connections", profile("postgresql", "Route-named", "test"), 200);
             check(get(base, "/api/connections/test", 200).contains("fixture-secret"), "Valid IDs matching route names can be edited");
@@ -95,8 +97,9 @@ public final class ConnectionHttpTest {
             post(base, "/api/connections", profile("postgresql", "Updated offline", saved).replace("fixture-secret", "updated-secret"), 200);
             server.stop();
             registry = new ConnectionRegistry(factory, new ConnectionStore(config.dataDir));
-            server = new ThriftQueryServer(config, registry); server.start(0);
+            server = new ThriftQueryServer(config, registry, new GitHubAuth(config.auth, (code, verifier) -> "fixture-user")); server.start(0);
             base = "http://127.0.0.1:" + server.port();
+            sessionCookie = GitHubAuthTest.login(base);
             check(get(base, "/api/connections", 200).contains("\"defaultConnectionId\":null"), "Restart has no implicit default");
             check(registry.entries().stream().noneMatch(ConnectionRegistry.Entry::connected), "Restart restores only disconnected profiles");
             check(get(base, "/api/health", 200).contains("\"configured\":false"), "Saved profiles are not active connections");
@@ -173,7 +176,7 @@ public final class ConnectionHttpTest {
         return request(HttpRequest.newBuilder(URI.create(base + path)).DELETE().build(), status);
     }
     private static String request(HttpRequest request, int status) throws Exception {
-        HttpResponse<String> response = CLIENT.send(request, HttpResponse.BodyHandlers.ofString());
+        HttpResponse<String> response = CLIENT.send(HttpRequest.newBuilder(request, (name, value) -> true).header("Cookie", sessionCookie).build(), HttpResponse.BodyHandlers.ofString());
         check(response.statusCode() == status, request.uri().getPath() + " expected " + status + ", got " + response.statusCode() + ": " + response.body());
         check(response.headers().firstValue("Cache-Control").orElse("").equals("no-store"), "API responses must not be cached");
         return response.body();

@@ -12,6 +12,10 @@ services:
       PORT: 4173
       QUERY_TIMEOUT_MS: "${QUERY_TIMEOUT_MS:-30000}"
       DEFAULT_QUERY_LIMIT: "${DEFAULT_QUERY_LIMIT:-50}"
+      APP_URL: "${APP_URL:-http://127.0.0.1:4173}"
+      GITHUB_CLIENT_ID: "${GITHUB_CLIENT_ID:-}"
+      GITHUB_CLIENT_SECRET: "${GITHUB_CLIENT_SECRET:-}"
+      GITHUB_ALLOWED_USERS: "${GITHUB_ALLOWED_USERS:-}"
     restart: unless-stopped
     volumes:
       - gridbase-data:/app/data

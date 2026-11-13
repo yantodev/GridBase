@@ -13,14 +13,16 @@ public final class AppConfig {
     public final int defaultQueryLimit;
     public final Path publicDir;
     public final Path dataDir;
+    final AuthConfig auth;
 
-    private AppConfig(String host, int port, int timeoutSeconds, int defaultQueryLimit, Path publicDir) {
+    private AppConfig(String host, int port, int timeoutSeconds, int defaultQueryLimit, Path publicDir, AuthConfig auth) {
         this.host = host;
         this.port = port;
         this.timeoutSeconds = timeoutSeconds;
         this.defaultQueryLimit = defaultQueryLimit;
         this.publicDir = publicDir;
         this.dataDir = publicDir.getParent().resolve("data");
+        this.auth = auth;
     }
 
     public static AppConfig load(Path projectRoot) {
@@ -29,12 +31,17 @@ public final class AppConfig {
 
     static AppConfig load(Path projectRoot, Map<String, String> environment) {
         Map<String, String> fileValues = readDotEnv(projectRoot.resolve(".env"));
+        int port = boundedInt(value("PORT", environment, fileValues, "4173"), 1, 65535, 4173);
         return new AppConfig(
                 environment.getOrDefault("HOST", "127.0.0.1"),
-                boundedInt(value("PORT", environment, fileValues, "4173"), 1, 65535, 4173),
+                port,
                 boundedInt(value("QUERY_TIMEOUT_MS", environment, fileValues, "30000"), 1000, 120000, 30000) / 1000,
                 boundedInt(value("DEFAULT_QUERY_LIMIT", environment, fileValues, "50"), 1, 10000, 50),
-                projectRoot.resolve("public").toAbsolutePath().normalize()
+                projectRoot.resolve("public").toAbsolutePath().normalize(),
+                new AuthConfig(value("APP_URL", environment, fileValues, "http://127.0.0.1:" + port),
+                        value("GITHUB_CLIENT_ID", environment, fileValues, ""),
+                        value("GITHUB_CLIENT_SECRET", environment, fileValues, ""),
+                        AuthConfig.users(value("GITHUB_ALLOWED_USERS", environment, fileValues, "")))
         );
     }
 

@@ -22,6 +22,23 @@
 * { box-sizing: border-box; }
 [hidden] { display: none !important; }
 body { margin: 0; }
+.login-page { min-height: 100vh; min-height: 100svh; display: grid; place-items: center; padding: 32px 20px; background: var(--editor); }
+.login-panel { width: 100%; max-width: 400px; }
+.login-brand { display: flex; align-items: center; gap: 9px; margin-bottom: 54px; font-size: 18px; font-weight: 600; }
+.login-brand svg { width: 26px; height: 26px; color: var(--blue); }
+.login-eyebrow { margin: 0 0 10px; color: var(--muted); font-size: 11px; letter-spacing: .14em; }
+.login-panel h1 { margin: 0 0 12px; font-size: clamp(25px, 6vw, 30px); line-height: 1.25; font-weight: 600; letter-spacing: -.02em; }
+.login-description { margin: 0 0 28px; color: var(--muted); font-size: 14px; line-height: 1.7; }
+.github-login { display: flex; align-items: center; justify-content: center; gap: 10px; min-height: 46px; padding: 10px 16px; border: 1px solid #527d57; border-radius: 5px; background: #344c38; color: #e2f1e3; font-size: 14px; font-weight: 500; text-decoration: none; }
+.github-login:hover { background: #3b5c40; }
+.github-login svg { width: 21px; height: 21px; fill: currentColor; stroke: none; }
+.github-login[aria-disabled="true"] { opacity: .5; cursor: default; }
+.login-note { margin: 14px 0 0; color: var(--muted); font-size: 12px; text-align: center; }
+.login-message { padding: 12px 14px; margin: 0 0 18px; border: 1px solid #6c4747; border-radius: 4px; background: #35272a; color: var(--error); overflow-wrap: anywhere; }
+.login-footer { display: flex; justify-content: center; flex-wrap: wrap; gap: 9px; margin-top: 52px; padding-top: 20px; border-top: 1px solid var(--border); color: var(--muted); font-size: 12px; }
+.session-controls { display: flex; align-items: center; gap: 8px; margin-left: 6px; padding-left: 10px; border-left: 1px solid var(--border); min-width: 0; }
+.session-user { max-width: 140px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted); font-size: 12px; }
+@media (max-width: 700px) { .session-user { display: none; } .session-controls { gap: 0; margin-left: 0; padding-left: 5px; } }
 button, input, textarea, select { font: inherit; }
 button { color: inherit; cursor: pointer; }
 button, input, select { border: 1px solid transparent; border-radius: 4px; }

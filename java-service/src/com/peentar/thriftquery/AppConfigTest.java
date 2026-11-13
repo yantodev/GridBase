@@ -21,6 +21,16 @@ public final class AppConfigTest {
             Files.delete(root.resolve(".env"));
             AppConfig defaults = AppConfig.load(root, Map.of());
             check(defaults.port == 4173 && defaults.timeoutSeconds == 30 && defaults.defaultQueryLimit == 50, "Server defaults");
+            check(!defaults.auth.configured() && defaults.auth.callbackUrl().equals("http://127.0.0.1:4173/auth/github/callback"), "Auth defaults remain locked until configured");
+            Files.writeString(root.resolve(".env"), "APP_URL=https://gridbase.example/\nGITHUB_CLIENT_ID=file-id\nGITHUB_CLIENT_SECRET='file-secret'\nGITHUB_ALLOWED_USERS=Alice, BOB\n");
+            AppConfig auth = AppConfig.load(root, Map.of("GITHUB_CLIENT_ID", "environment-id"));
+            check(auth.auth.clientId().equals("environment-id") && auth.auth.clientSecret().equals("file-secret"), "Auth configuration respects environment overrides");
+            check(auth.auth.secure() && auth.auth.appUrl().equals("https://gridbase.example") && auth.auth.allowedUsers().equals(java.util.Set.of("alice", "bob")), "Normalize origin and GitHub allowlist");
+            check(AppConfig.load(root, Map.of("APP_URL", "https://GridBase.example:443/")).auth.appUrl().equals("https://gridbase.example"), "Origin matches the browser with a default port and mixed-case hostname");
+            for (String invalid : java.util.List.of("http://gridbase.example", "https://gridbase.example/path", "https://user:secret@gridbase.example", "https://gridbase.example?next=evil")) {
+                try { AppConfig.load(root, Map.of("APP_URL", invalid)); throw new AssertionError("Invalid APP_URL must be rejected"); }
+                catch (IllegalArgumentException expected) { }
+            }
         } finally {
             try (var paths = Files.walk(root)) { for (Path path : paths.sorted(java.util.Comparator.reverseOrder()).toList()) Files.deleteIfExists(path); }
         }

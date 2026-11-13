@@ -33,6 +33,7 @@
       <h1>GridBase</h1><span class="title-divider"></span><span id="project-name" class="project-name">s3tables</span>
       <span id="connection-status" class="connection-status" role="status"><span class="status-dot"></span><span id="connection-label">Checking server…</span></span>
       <button id="retry-connection" class="icon-button" type="button" title="Check connection" aria-label="Check connection"><svg><use href="#i-refresh"/></svg></button>
+      <div class="session-controls"><span id="session-user" class="session-user" aria-label="GitHub account">GitHub</span><button id="logout" class="tool-button" type="button">Keluar</button></div>
     </header>
     <nav class="tool-rail" aria-label="Tool windows">
       <button id="database-tool" class="rail-button is-active" type="button" aria-label="Database explorer" title="Database explorer" aria-controls="sidebar" aria-expanded="true"><svg><use href="#i-database"/></svg></button>
@@ -106,6 +107,7 @@
   </dialog>
   <dialog id="rename-dialog" class="workbench-dialog" aria-labelledby="rename-heading"><form id="rename-form"><h2 id="rename-heading">Rename console</h2><label for="console-name">Console name</label><input id="console-name" maxlength="80" required autocomplete="off" /><div class="dialog-actions"><button id="cancel-rename" class="tool-button" type="button">Cancel</button><button class="primary-button" type="submit">Save</button></div></form></dialog>
   <dialog id="row-detail" class="workbench-dialog row-detail" aria-labelledby="row-detail-heading"><header class="pane-heading"><h2 id="row-detail-heading">Row detail</h2><button id="close-row-detail" class="icon-button" type="button" aria-label="Close row detail"><svg><use href="#i-close"/></svg></button></header><div id="row-detail-table-wrap" class="row-detail-table-wrap"></div></dialog>
+  <script src="/session.js" defer></script>
   <script src="/workbench-core.js" defer></script>
   <script src="/app.js" defer></script>
 </body>

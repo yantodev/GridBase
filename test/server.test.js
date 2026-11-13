@@ -164,12 +164,14 @@ test('legacy backend exposes its default source and rejects foreign IDs before e
   const response={writeHead(status){this.status=status;},end(body){this.data=JSON.parse(body);}};
   await handleQuery(Readable.from([JSON.stringify({sql:'DELETE FROM fixture',connectionId:'other-source'})]),response,async()=>{executed=true;});
   assert.equal(response.status,404);assert.equal(executed,false);
-  const server=createServer();await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
+  const server=createServer({environment:{GITHUB_CLIENT_ID:'fixture',GITHUB_CLIENT_SECRET:'fixture'},identify:async()=> 'fixture-user'});await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
   try {
     const base='http://127.0.0.1:'+server.address().port;
-    const sources=await (await fetch(base+'/api/connections')).json();
+    const cookie=await require('./auth-helpers').login(base);
+    const headers={Cookie:cookie,'Content-Type':'application/json'};
+    const sources=await (await fetch(base+'/api/connections',{headers})).json();
     assert.ok(Array.isArray(sources.connections));assert.ok(sources.connections.every(item=>item.id==='default'));
-    assert.equal((await fetch(base+'/api/databases?connectionId=other-source')).status,404);
-    assert.equal((await fetch(base+'/api/connections/connect',{method:'POST'})).status,501);
+    assert.equal((await fetch(base+'/api/databases?connectionId=other-source',{headers})).status,404);
+    assert.equal((await fetch(base+'/api/connections/connect',{method:'POST',headers})).status,501);
   } finally { await new Promise(resolve=>server.close(resolve)); }
 });
