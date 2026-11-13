@@ -130,21 +130,14 @@ membutuhkan driver JDBC tambahan seperti dijelaskan di atas.
 Script startup dan pengujian mengunduh driver SQLite versi terkunci dari Maven Central ke
 `build/deps` dan memverifikasi SHA-256. Unduhan hanya diperlukan bila cache belum tersedia.
 
-```bash
-ls /home/buana/.local/opt/spark-3.5.6-bin-hadoop3/jars/hive-jdbc-2.3.9.jar
-```
-
-Jika Spark terpasang di lokasi standar:
+Jalankan dari direktori proyek dan atur `SPARK_HOME` sesuai lokasi instalasi Spark
+di komputer Anda. Ganti `/path/ke/GridBase` dan `/path/ke/spark-3.5.6-bin-hadoop3`
+pada contoh berikut dengan direktori yang digunakan:
 
 ```bash
-cd /home/buana/Documents/Project/thrift-query-ui
-npm start
-```
-
-Jika lokasi Spark berbeda:
-
-```bash
-export SPARK_HOME=/path/ke/spark-3.5.6-bin-hadoop3
+cd /path/ke/GridBase
+export SPARK_HOME="/path/ke/spark-3.5.6-bin-hadoop3"
+ls "$SPARK_HOME/jars/hive-jdbc-2.3.9.jar"
 npm start
 ```
 
