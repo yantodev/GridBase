@@ -9,6 +9,8 @@ public final class ConnectionProfileTest {
         check(!postgres.safeJson().contains("secret"), "safe connection JSON must not contain password");
         expectInvalid(() -> ConnectionProfile.fromJson("{\"type\":\"postgresql\",\"host\":\"db.local/path\",\"database\":\"app\",\"username\":\"u\",\"password\":\"p\"}"));
         expectInvalid(() -> ConnectionProfile.fromJson("{\"type\":\"oracle\",\"username\":\"u\",\"password\":\"p\",\"jdbcUrl\":\"jdbc:oracle:thin:@db\"}"));
+        ConnectionProfile secrets = new ConnectionProfile(DatabaseType.HIVE, "fixture", "jdbc:hive2://user:authority-secret@fixture/db;hive.server2.thrift.http.headers=Authorization:header-secret;password=param-secret", "fixture", "fixture-secret");
+        check(!secrets.safeJson().contains("authority-secret") && !secrets.safeJson().contains("header-secret") && !secrets.safeJson().contains("param-secret"), "Redact arbitrary JDBC auth parameters and user info");
         System.out.println("Connection profile tests passed");
     }
 

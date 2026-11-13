@@ -23,7 +23,7 @@ function loadDotEnv(filePath = path.join(ROOT, ".env"), environment = process.en
   const lines = fs.readFileSync(filePath, "utf8").split(/\r?\n/);
   for (const line of lines) {
     const match = line.match(/^\s*([A-Z][A-Z0-9_]*)\s*=\s*(.*)\s*$/);
-    if (!match || environment[match[1]]?.trim()) continue;
+    if (!match || !["PORT", "QUERY_TIMEOUT_MS", "DEFAULT_QUERY_LIMIT"].includes(match[1]) || environment[match[1]]?.trim()) continue;
     const rawValue = match[2].trim();
     const quoted = (rawValue.startsWith('"') && rawValue.endsWith('"')) || (rawValue.startsWith("'") && rawValue.endsWith("'"));
     environment[match[1]] = quoted && rawValue.length >= 2 ? rawValue.slice(1, -1) : rawValue;
@@ -260,6 +260,10 @@ async function handleQuery(request, response, execute = runBeeline) {
     return;
   }
 
+  if (body.connectionId && body.connectionId !== 'default') {
+    sendJson(response, 404, { error: "Koneksi tidak ditemukan. Backend Node legacy hanya mendukung koneksi default." });
+    return;
+  }
   const validation = validateQuery(body.sql);
   if (!validation.ok) {
     sendJson(response, 422, { error: validation.error });
@@ -377,6 +381,20 @@ function serveStatic(request, response) {
 function createServer() {
   return http.createServer(async (request, response) => {
     const url = new URL(request.url, "http://localhost");
+    if (request.method === "GET" && url.pathname === "/api/connections") {
+      const health = getHealth();
+      sendJson(response, 200, { defaultConnectionId: health.configured ? "default" : null,
+        connections: health.configured ? [{ id: "default", name: "Spark Thrift / Hive", type: "hive" }] : [] });
+      return;
+    }
+    if (request.method === "POST" && url.pathname.startsWith("/api/connections/")) {
+      sendJson(response, 501, { error: "Multi koneksi membutuhkan backend Java JDBC. Jalankan npm start." });
+      return;
+    }
+    if (request.method === "GET" && ["/api/databases", "/api/namespaces", "/api/tables", "/api/columns"].includes(url.pathname)
+        && url.searchParams.get("connectionId") && url.searchParams.get("connectionId") !== "default") {
+      sendJson(response, 404, { error: "Koneksi tidak ditemukan." }); return;
+    }
     if (request.method === "GET" && ["/api/tables", "/api/columns"].includes(url.pathname)) {
       await handleMetadata(response, url);
       return;

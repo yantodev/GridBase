@@ -18,7 +18,7 @@ public final class JdbcMetadataTest {
     public static void main(String[] args) throws Exception {
         Path root = Files.createTempDirectory("thrift-metadata-test");
         try {
-            AppConfig config = AppConfig.load(root, Map.of("THRIFT_JDBC_URL", "jdbc:hive2://fixture.example/default", "THRIFT_USERNAME", "fixture", "THRIFT_PASSWORD", "fixture", "DEFAULT_QUERY_LIMIT", "10"));
+            AppConfig config = AppConfig.load(root, Map.of("DEFAULT_QUERY_LIMIT", "10"));
             List<String> labels = new ArrayList<>();
             List<List<String>> rows = new ArrayList<>();
             String[] executed = {""};
@@ -33,7 +33,7 @@ public final class JdbcMetadataTest {
                 case "setReadOnly", "close" -> null;
                 default -> throw new UnsupportedOperationException(m.getName());
             });
-            JdbcService service = new JdbcService(config, () -> connection);
+            JdbcService service = new JdbcService(config, new ConnectionProfile(DatabaseType.HIVE, "Fixture", "jdbc:hive2://fixture.example/default", "fixture", "fixture"), () -> connection);
             labels.add("namespace");
             for(int i=0;i<25;i++) rows.add(List.of("schema_"+i));
             if(service.databases().size()!=25) throw new AssertionError("Metadata must bypass ten-row query cap");

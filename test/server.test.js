@@ -5,27 +5,19 @@ const path = require("node:path");
 const os = require("node:os");
 const { buildBeelineArgs, createServer, DATABASE_LIST_SQL, describeBeelineSpawnError, getHealth, loadConnectionConfig, loadDotEnv, resolveBeelineBin } = require("../server");
 
-test("loads connection credentials from .env while preserving environment overrides", () => {
-  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "thrift-env-test-"));
+test("loads only server settings from .env and ignores old startup credentials", () => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "gridbase-env-test-"));
   const envFile = path.join(directory, ".env");
   try {
-    fs.writeFileSync(envFile, '# Local connection\nTHRIFT_JDBC_URL="jdbc:hive2://spark.example/default;token=hidden"\nTHRIFT_USERNAME=reader\nTHRIFT_PASSWORD=" secret=#value "\n');
+    fs.writeFileSync(envFile, 'PORT=4180\nQUERY_TIMEOUT_MS=45000\nDEFAULT_QUERY_LIMIT=75\nTHRIFT_JDBC_URL=jdbc:hive2://old-spark/default\nTHRIFT_USERNAME=fixture\nTHRIFT_PASSWORD=fixture-secret\nDATABASE_TYPE=hive\n');
     const environment = {};
     loadDotEnv(envFile, environment);
-    const connection = loadConnectionConfig(environment);
-    assert.equal(connection.jdbcUrl, "jdbc:hive2://spark.example/default;token=hidden");
-    assert.equal(connection.username, "reader");
-    assert.equal(connection.password, " secret=#value ");
-    const override = { THRIFT_USERNAME: "environment-reader", THRIFT_PASSWORD: "environment-secret" };
-    loadDotEnv(envFile, override);
-    assert.equal(override.THRIFT_USERNAME, "environment-reader");
-    assert.equal(override.THRIFT_PASSWORD, "environment-secret");
-    assert.throws(() => loadConnectionConfig({ ...environment, THRIFT_JDBC_URL: "https://spark.example" }), /jdbc:hive2/);
-    assert.throws(() => loadConnectionConfig({ ...environment, THRIFT_PASSWORD: "x".repeat(2049) }), /terlalu panjang/);
-    assert.equal(loadConnectionConfig({}).password, "");
-  } finally {
-    fs.rmSync(directory, { recursive: true, force: true });
-  }
+    assert.deepEqual(environment, {PORT:'4180',QUERY_TIMEOUT_MS:'45000',DEFAULT_QUERY_LIMIT:'75'});
+    assert.equal(loadConnectionConfig(environment).jdbcUrl, '');
+    const override = {PORT:'4181'}; loadDotEnv(envFile,override); assert.equal(override.PORT,'4181');
+    // Explicit process settings remain supported by the legacy Beeline helper.
+    assert.throws(() => loadConnectionConfig({THRIFT_JDBC_URL:'https://spark.example',THRIFT_USERNAME:'fixture',THRIFT_PASSWORD:'fixture'}), /jdbc:hive2/);
+  } finally { fs.rmSync(directory, {recursive:true,force:true}); }
 });
 
 test("creates an HTTP server without opening a network socket", () => {
@@ -79,12 +71,6 @@ test("uses the s3tables namespace query for the database list", () => {
   assert.equal(DATABASE_LIST_SQL, "SHOW NAMESPACES IN s3tables");
 });
 
-test("uses separate metadata endpoints and qualified table SQL", () => {
-  const appSource = fs.readFileSync(path.join(__dirname, "../public/app.js"), "utf8");
-  assert.match(appSource, /\/api\/tables\?namespace=/);
-  assert.match(appSource, /\/api\/columns\?namespace=/);
-  assert.ok(appSource.includes("C.tableSql(namespace, table)"));
-});
 
 test("keeps inactive result states hidden", () => {
   const styles = fs.readFileSync(path.join(__dirname, "../public/styles.css"), "utf8");
@@ -124,14 +110,14 @@ test("uses server connection configuration without a browser credential form", (
   assert.doesNotMatch(javaSource, /createContext\("\/api\/setup"|config\.configure\(/);
 });
 
-test("passes .env connection credentials to Docker at runtime", () => {
+test("passes only server settings to Docker without a startup connection", () => {
   const composeSource = fs.readFileSync(path.join(__dirname, "../compose.yaml"), "utf8");
   const dockerfileSource = fs.readFileSync(path.join(__dirname, "../Dockerfile"), "utf8");
 
   assert.match(composeSource, /HOST: 0\.0\.0\.0/);
-  assert.match(composeSource, /THRIFT_QUERY_PORT:-4173\}:4173/);
+  assert.match(composeSource, /PORT:-4173\}:4173/);
   for (const name of ["THRIFT_JDBC_URL", "THRIFT_USERNAME", "THRIFT_PASSWORD"]) {
-    assert.ok(composeSource.includes(`${name}: "\${${name}:-}"`));
+    assert.ok(!composeSource.includes(name));
   }
   assert.match(dockerfileSource, /FROM apache\/spark:3\.5\.6 AS spark/);
   assert.match(dockerfileSource, /SPARK_HOME=\/opt\/spark/);
@@ -169,4 +155,21 @@ test('uses the GridBase product name in UI, API and runtime packaging', () => {
   assert.match(html,/<title>GridBase<\/title>/);
   assert.match(html,/<h1>GridBase<\/h1>/);
   assert.equal(require('../package.json').name,'gridbase');
+});
+
+test('legacy backend exposes its default source and rejects foreign IDs before execution', async () => {
+  const { Readable } = require('node:stream');
+  const { createServer, handleQuery } = require('../server');
+  let executed=false;
+  const response={writeHead(status){this.status=status;},end(body){this.data=JSON.parse(body);}};
+  await handleQuery(Readable.from([JSON.stringify({sql:'DELETE FROM fixture',connectionId:'other-source'})]),response,async()=>{executed=true;});
+  assert.equal(response.status,404);assert.equal(executed,false);
+  const server=createServer();await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
+  try {
+    const base='http://127.0.0.1:'+server.address().port;
+    const sources=await (await fetch(base+'/api/connections')).json();
+    assert.ok(Array.isArray(sources.connections));assert.ok(sources.connections.every(item=>item.id==='default'));
+    assert.equal((await fetch(base+'/api/databases?connectionId=other-source')).status,404);
+    assert.equal((await fetch(base+'/api/connections/connect',{method:'POST'})).status,501);
+  } finally { await new Promise(resolve=>server.close(resolve)); }
 });

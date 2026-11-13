@@ -83,13 +83,14 @@
         if(!t || typeof t.id!=='string' || !/^[a-zA-Z0-9_-]{1,100}$/.test(t.id) || seen.has(t.id) || typeof t.sql!=='string' || t.sql.length>20000)return false;
         seen.add(t.id);return true;
       }).slice(0,20).map(t=>({id:t.id,name:typeof t.name==='string'&&t.name.trim()?t.name.slice(0,80):'Console',sql:t.sql,
+        ...(typeof t.connectionId==='string' && (t.connectionId==='' || /^[a-zA-Z0-9_-]{1,100}$/.test(t.connectionId))?{connectionId:t.connectionId}:{}),
         ...(t.source && typeof t.source.namespace==='string' && typeof t.source.table==='string'?{source:{namespace:t.source.namespace,table:t.source.table}}:{})}));
       if(tabs.length)return {tabs,activeId:tabs.some(t=>t.id===data.activeId)?data.activeId:tabs[0].id};
     }catch{/* Corrupt or unavailable storage starts a clean console. */}
     const tab=newTab('Console 1', 'SELECT CURRENT_DATE AS today;');
     return {tabs:[tab],activeId:tab.id};
   }
-  function serializeDrafts(state){return JSON.stringify({activeId:state.activeId,tabs:state.tabs.map(t=>({id:t.id,name:t.name,sql:t.sql,...(t.source?{source:t.source}:{})}))});}
+  function serializeDrafts(state){return JSON.stringify({activeId:state.activeId,tabs:state.tabs.map(t=>({id:t.id,name:t.name,sql:t.sql,...(typeof t.connectionId==='string'?{connectionId:t.connectionId}:{}),...(t.source?{source:t.source}:{})}))});}
   function compareValues(a,b) {
     if(a==null)return b==null?0:1;
     if(b==null)return -1;

@@ -189,7 +189,7 @@ svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width:
 .workbench-dialog h2 { margin: 0 0 16px; font-size: 16px; font-weight: 500; }
 .workbench-dialog form > label { display: block; color: var(--muted); margin-bottom: 6px; }
 .workbench-dialog input { width: 100%; }
-.dialog-actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 20px; }
+.dialog-actions { display: flex; flex-wrap: wrap; gap: 8px; justify-content: flex-end; margin-top: 20px; }
 .dialog-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 18px; }
 .dialog-heading h2 { margin-bottom: 4px; }
 .dialog-subtitle { color: var(--muted); font-size: 12px; line-height: 1.6; margin: 0 0 16px; max-width: 58ch; }
@@ -201,7 +201,7 @@ svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width:
 .saved-connection-main { display: grid; grid-template-columns: 18px minmax(0, 1fr); grid-template-rows: auto auto; column-gap: 6px; flex: 1; text-align: left; padding: 8px 5px 8px 9px; min-width: 0; }
 .saved-connection-main svg { grid-row: 1 / -1; width: 15px; height: 15px; color: var(--blue); margin-top: 2px; }
 .saved-connection-main span, .saved-connection-main small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.saved-connection-main small { color: var(--muted); font-size: 11px; }
+.saved-connection-main small { color: var(--muted); font-size: 12px; }
 .saved-connection-remove { width: 26px; color: var(--muted); }
 .connection-fields { min-width: 0; }
 .connection-fields > label, .connection-fields .field-grid label { display: block; color: var(--muted); margin: 0 0 5px; font-size: 12px; }
@@ -255,3 +255,28 @@ body.is-resizing { user-select: none; }
 .sort-indicator { width: 12px; height: 12px; margin-left: 8px; vertical-align: middle; }
 .sort-indicator.is-ascending { transform: rotate(-90deg); }
 .sort-indicator.is-descending { transform: rotate(90deg); }
+
+.database-actions { display: flex; align-items: center; justify-content: space-between; padding: 6px 10px 0; gap: 4px; }
+.database-actions .tool-button { color: var(--text); }
+.catalog-root { color: var(--muted); font-size: 12px; }
+.data-source + .data-source { margin-top: 8px; }
+.source-row { padding-left: 6px; }
+.source-row.is-selected { background: var(--selection); }
+.source-name svg { color: var(--blue); }
+.source-row .icon-button { width: 26px; height: 26px; color: var(--muted); }
+.source-row .icon-button svg { width: 14px; height: 14px; }
+.source-caption { margin: 0 10px 3px 32px; color: var(--muted); font-size: 12px; overflow-wrap: anywhere; line-height: 1.5; }
+.schema-row { padding-left: 24px; }
+.source-objects .table-row { padding-left: 40px; }
+.source-objects .column-row { padding-left: 78px; }
+.console-connection-label { font-size: 12px; color: var(--muted); }
+.console-connection { flex: 0 1 240px; min-width: 90px; max-width: 280px; width: auto; height: 28px; font-size: 12px; text-overflow: ellipsis; }
+.editor-toolbar { flex-wrap: wrap; }
+.console-context { max-width: 240px; }
+.saved-connection-remove svg { width: 14px; height: 14px; }
+@media (max-width: 700px) {
+  .console-connection { flex: 1 1 120px; max-width: 100%; }
+  .console-connection-label { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
+  .editor-toolbar .console-context { flex-basis: 100%; margin-left: 4px; }
+  .console-context:empty { display: none; }
+}

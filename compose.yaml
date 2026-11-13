@@ -6,14 +6,10 @@ services:
     image: gridbase:local
     init: true
     ports:
-      - "${THRIFT_QUERY_PORT:-4173}:4173"
+      - "${PORT:-4173}:4173"
     environment:
       HOST: 0.0.0.0
       PORT: 4173
-      THRIFT_JDBC_URL: "${THRIFT_JDBC_URL:-}"
-      THRIFT_USERNAME: "${THRIFT_USERNAME:-}"
-      THRIFT_PASSWORD: "${THRIFT_PASSWORD:-}"
       QUERY_TIMEOUT_MS: "${QUERY_TIMEOUT_MS:-30000}"
       DEFAULT_QUERY_LIMIT: "${DEFAULT_QUERY_LIMIT:-50}"
-      DATABASE_TYPE: "${DATABASE_TYPE:-}"
     restart: unless-stopped

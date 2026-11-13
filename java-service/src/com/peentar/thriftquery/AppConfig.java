@@ -7,29 +7,15 @@ import java.util.HashMap;
 import java.util.Map;
 
 public final class AppConfig {
-    private static final int MAX_JDBC_URL_LENGTH = 2048;
-    private static final int MAX_USERNAME_LENGTH = 256;
-    private static final int MAX_PASSWORD_LENGTH = 2048;
-
     public final String host;
     public final int port;
     public final int timeoutSeconds;
     public final int defaultQueryLimit;
     public final Path publicDir;
-    public final DatabaseType databaseType;
 
-    private final String jdbcUrl;
-    private final String username;
-    private final String password;
-
-    private AppConfig(String host, int port, DatabaseType databaseType, String jdbcUrl, String username, String password,
-                      int timeoutSeconds, int defaultQueryLimit, Path publicDir) {
+    private AppConfig(String host, int port, int timeoutSeconds, int defaultQueryLimit, Path publicDir) {
         this.host = host;
         this.port = port;
-        this.databaseType = databaseType;
-        this.jdbcUrl = jdbcUrl;
-        this.username = username;
-        this.password = password;
         this.timeoutSeconds = timeoutSeconds;
         this.defaultQueryLimit = defaultQueryLimit;
         this.publicDir = publicDir;
@@ -41,55 +27,13 @@ public final class AppConfig {
 
     static AppConfig load(Path projectRoot, Map<String, String> environment) {
         Map<String, String> fileValues = readDotEnv(projectRoot.resolve(".env"));
-        String jdbcUrl = value("THRIFT_JDBC_URL", environment, fileValues, "").trim();
-        String typeValue = value("DATABASE_TYPE", environment, fileValues,
-                value("DB_TYPE", environment, fileValues, ""));
-        DatabaseType databaseType = typeValue.isBlank() ? DatabaseType.infer(jdbcUrl) : DatabaseType.parse(typeValue);
-        AppConfig config = new AppConfig(
-                value("HOST", environment, fileValues, "127.0.0.1"),
+        return new AppConfig(
+                environment.getOrDefault("HOST", "127.0.0.1"),
                 boundedInt(value("PORT", environment, fileValues, "4173"), 1, 65535, 4173),
-                databaseType,
-                jdbcUrl,
-                value("THRIFT_USERNAME", environment, fileValues, "").trim(),
-                value("THRIFT_PASSWORD", environment, fileValues, ""),
                 boundedInt(value("QUERY_TIMEOUT_MS", environment, fileValues, "30000"), 1000, 120000, 30000) / 1000,
                 boundedInt(value("DEFAULT_QUERY_LIMIT", environment, fileValues, "50"), 1, 10000, 50),
                 projectRoot.resolve("public").toAbsolutePath().normalize()
         );
-        if (config.configured()) {
-            requireValue(config.jdbcUrl, "JDBC URL", MAX_JDBC_URL_LENGTH);
-            requireValue(config.username, "username", MAX_USERNAME_LENGTH);
-            requireValue(config.password, "password", MAX_PASSWORD_LENGTH);
-            if (config.databaseType == null) throw new IllegalArgumentException("Tipe database tidak dapat ditentukan dari JDBC URL.");
-            config.databaseType.validateUrl(config.jdbcUrl);
-        }
-        return config;
-    }
-
-    public boolean configured() {
-        return !jdbcUrl().isBlank() && !username().isBlank() && !password().isBlank();
-    }
-
-    public String jdbcUrl() {
-        return jdbcUrl;
-    }
-
-    public String username() {
-        return username;
-    }
-
-    public String password() {
-        return password;
-    }
-
-    public ConnectionProfile connectionProfile() {
-        return ConnectionProfile.fromEnvironment(databaseType, jdbcUrl, username, password);
-    }
-
-    public String redactedTarget() {
-        String configuredUrl = jdbcUrl();
-        if (configuredUrl.isBlank()) return null;
-        return configuredUrl.replaceAll("(?i)((?:^|[;?&])(password|token|secret)=)[^;&]*", "$1••••••");
     }
 
     private static String value(String key, Map<String, String> environment, Map<String, String> fileValues, String fallback) {
@@ -105,12 +49,6 @@ public final class AppConfig {
         } catch (NumberFormatException ignored) {
             return fallback;
         }
-    }
-
-    private static String requireValue(String value, String label, int maxLength) {
-        if (value == null || value.isBlank()) throw new IllegalArgumentException(label + " wajib diisi.");
-        if (value.length() > maxLength) throw new IllegalArgumentException(label + " terlalu panjang.");
-        return value;
     }
 
     private static Map<String, String> readDotEnv(Path path) {

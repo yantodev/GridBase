@@ -11,7 +11,7 @@
 
 GUI lokal untuk membaca, membuat, memperbarui, dan menghapus data melalui JDBC langsung dari Java.
 Connection manager bergaya DataGrip mendukung Spark Thrift / Hive, PostgreSQL, dan MySQL.
-Password dikirim hanya saat test/connect dan tidak disimpan di browser.
+Password dikirim hanya saat test/connect. Password dan JDBC URL tidak disimpan di browser.
 
 ## Workspace bergaya DataGrip
 
@@ -23,44 +23,49 @@ Tema dark dengan alur inti yang mengacu pada [query consoles dan query output Da
 - **Results / Output:** hasil terikat ke console asal, termasuk saat berpindah tab selama query berjalan. Klik heading kolom untuk sort, gunakan filter untuk mencari baris yang sudah dikembalikan, lalu unduh seluruh hasil filter melalui CSV/JSON. Klik nomor baris atau klik dua kali pada baris untuk detail vertikal.
 - **Layout:** rail kiri membuka Database atau History. Geser pembatas explorer/editor atau fokuskan pembatas lalu gunakan tombol panah, Home, dan End. Pada layar kecil explorer tampil sebagai overlay yang dapat ditutup dengan Escape.
 
-Status `Configured` menandakan koneksi tersedia; `Connected` baru muncul setelah metadata berhasil diambil. Kegagalan metadata menyediakan retry. SQL memakai identifier sesuai dialect database aktif.
+Setiap data source menampilkan status konfigurasi dan error metadata beserta retry. Status di title bar serta dialect editor mengikuti koneksi tab SQL yang aktif.
 
 Implementasi ini mempertahankan branding GridBase dan tidak memakai aset JetBrains. Pengeditan sel langsung serta pengelolaan transaksi belum termasuk; perubahan data dijalankan melalui SQL sesuai dukungan Spark dan izin akun.
 
 ## Konfigurasi koneksi
 
-Klik ikon pengaturan di title bar untuk membuka **Database connections**. Pilih PostgreSQL,
-MySQL, atau Spark Thrift / Hive, isi detail koneksi, lalu gunakan **Test connection** sebelum
-**Connect**. Profil yang disimpan hanya berisi detail non-secret; password harus diisi ulang
-setelah browser reload. Koneksi aktif disimpan di memori backend.
+Klik **Add connection** di panel **Database sebelah kiri**. Pilih PostgreSQL, MySQL,
+atau Spark Thrift / Hive, isi detail koneksi, lalu gunakan **Test connection** atau **Connect**.
+Maksimal 20 koneksi dapat tersedia bersamaan. Nama boleh sama; setiap koneksi mempunyai ID sendiri.
+
+- Expand masing-masing data source untuk melihat schema, tabel, dan kolomnya.
+- Tombol console pada data source membuat tab SQL untuk koneksi tersebut. Membuka tabel juga
+  membuat tab pada koneksi asalnya, meskipun nama schema/tabel sama dengan database lain.
+- Pilihan **Connection** di toolbar mengatur koneksi tab SQL aktif. Memilih data source lain
+  di explorer tidak mengubah koneksi tab yang sudah ada. Pilihan dikunci selama eksekusi.
+- Ikon pengaturan pada data source membuka detailnya untuk reconnect atau **Disconnect**.
+  Disconnect hanya memutus koneksi tersebut; tabnya tetap tersimpan dan tidak dialihkan otomatis.
+- Profil non-secret, hubungan tab dengan koneksi, dan riwayat tersimpan di browser. Koneksi
+  aktif beserta kredensialnya hanya berada di memori server: reload browser tetap mengenalinya,
+  sedangkan restart server membutuhkan reconnect. Tidak ada koneksi database otomatis saat startup.
+  Untuk profil Hive, JDBC URL dan password perlu diisi lagi saat reconnect.
 
 Image Docker sudah membawa driver JDBC PostgreSQL dan MySQL. Untuk menjalankan lokal, letakkan
 driver tambahan di folder `drivers/` atau set `JDBC_DRIVER_DIR` ke folder yang berisi
 `postgresql-*.jar` dan `mysql-connector-j-*.jar`.
 
-Koneksi otomatis dari `.env` tetap didukung. Tambahkan `DATABASE_TYPE=postgresql` atau
-`DATABASE_TYPE=mysql` jika URL tidak cukup untuk mengenali jenis database.
-
-Salin contoh konfigurasi sebelum menjalankan aplikasi:
-
-```bash
-cp .env.example .env
-```
-
-Isi tiga variabel berikut di `.env` dengan koneksi Spark Thrift Server Anda:
+File `.env` hanya berisi pengaturan aplikasi:
 
 ```dotenv
-THRIFT_JDBC_URL=jdbc:hive2://spark.example:443/default;transportMode=http
-THRIFT_USERNAME=reader
-THRIFT_PASSWORD='isi-password-Anda'
+PORT=4173
+QUERY_TIMEOUT_MS=30000
+DEFAULT_QUERY_LIMIT=50
 ```
 
-Server membaca `.env` saat startup. Environment proses yang terisi memiliki
-prioritas di atas `.env`, termasuk pada backend Node legacy. Gunakan tanda kutip
-tunggal untuk menjaga karakter `$`, `#`, atau spasi pada password. File `.env` diabaikan Git dan
-tidak disertakan dalam Docker image; Compose meneruskan nilainya saat container
-dijalankan. Setelah mengubah konfigurasi, restart server atau jalankan ulang
-`docker compose up -d`.
+Salin `.env.example` menjadi `.env` bila belum ada. Nilai environment proses untuk tiga
+pengaturan ini memiliki prioritas lebih tinggi. File `.env` diabaikan Git dan tidak
+masuk Docker image. Compose meneruskan timeout dan limit serta menggunakan `PORT`
+sebagai port akses di host.
+
+Semua koneksi PostgreSQL, MySQL, dan Spark Thrift / Hive ditambahkan dari **Add connection**
+di panel Database. Kredensial Spark lama dari `.env` atau environment tidak membuat
+koneksi default di backend Java. Aplikasi mulai dengan daftar koneksi aktif kosong;
+profil yang tersimpan di browser perlu dihubungkan kembali setelah restart server.
 
 Jika belum ada koneksi, status menunjukkan `Not configured` dan tombol query dinonaktifkan.
 Username dan password tidak dikembalikan oleh endpoint health.
@@ -114,7 +119,7 @@ Perintah Spark yang tersedia di dalam container antara lain `spark-submit`,
 Untuk menggunakan port host lain:
 
 ```bash
-THRIFT_QUERY_PORT=8080 docker compose up --build -d
+PORT=8080 docker compose up --build -d
 ```
 
 Hentikan container dengan:
@@ -127,7 +132,7 @@ Buka <http://127.0.0.1:4173> untuk langsung menggunakan workspace.
 
 Konfigurasi Docker yang tersedia:
 
-- `THRIFT_QUERY_PORT` — port host untuk workbench, default `4173`.
+- `PORT` — port host untuk workbench, default `4173`.
 - `QUERY_TIMEOUT_MS` — batas waktu query, default `30000`.
 - `DEFAULT_QUERY_LIMIT` — batas hasil jika LIMIT tidak ditulis atau bernilai NULL, default `50`. LIMIT eksplisit pada SQL mengambil prioritas.
 
@@ -156,13 +161,20 @@ Kontrak API tersedia di [`openapi.yaml`](./openapi.yaml):
 
 - `GET /api/health` — status konfigurasi tanpa mengembalikan secret.
 - `POST /api/connections/test` — menguji detail JDBC tanpa mengaktifkannya.
-- `POST /api/connections/connect` — menguji dan mengaktifkan koneksi di memori backend.
-- `POST /api/connections/disconnect` — menghapus koneksi aktif.
-- `GET /api/databases` — daftar schema/database dari koneksi aktif.
-- `GET /api/tables?namespace=...` — daftar tabel pada namespace.
-- `GET /api/columns?namespace=...&table=...` — daftar kolom, tipe, dan komentar.
+- `GET /api/connections` — daftar koneksi dengan ID stabil dan metadata tanpa secret.
+- `POST /api/connections/connect` — tambah koneksi; sertakan `connectionId` untuk reconnect ID yang sama.
+- `POST /api/connections/disconnect` — body `{ "connectionId": "..." }`, menghapus satu koneksi dari memori.
+- `GET /api/databases?connectionId=...` — daftar schema/database dari koneksi yang dipilih.
+- `GET /api/tables?connectionId=...&namespace=...` — daftar tabel pada namespace.
+- `GET /api/columns?connectionId=...&namespace=...&table=...` — daftar kolom, tipe, dan komentar.
 - `GET /api/namespaces` — alias deprecated untuk klien lama; gunakan `/api/databases`.
-- `POST /api/query` — body `{ "sql": "SELECT ..." }`.
+- `POST /api/query` — body `{ "connectionId": "...", "sql": "SELECT ..." }`.
+
+Klien lama tanpa ID menggunakan koneksi pertama yang ditambahkan saat runtime.
+Jika koneksi tersebut di-disconnect, request tanpa ID tidak dialihkan ke koneksi lain;
+koneksi implicit baru ditentukan saat connect berikutnya. ID yang tidak dikenal
+mengembalikan 404. Backend Node legacy hanya mendukung Beeline; gunakan backend Java
+untuk pengelolaan koneksi melalui UI.
 
 Metadata memiliki batas terpisah 10.000 baris sehingga tidak terpotong oleh `DEFAULT_QUERY_LIMIT=50`. Identifier metadata di-escape dan divalidasi pada server.
 

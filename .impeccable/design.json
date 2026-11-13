@@ -1,6 +1,6 @@
 {
   "schemaVersion": 2,
-  "generatedAt": "2026-11-12T16:25:40.968711Z",
+  "generatedAt": "2026-11-12T17:51:43.652696Z",
   "title": "Design System: GridBase",
   "extensions": {
     "colorMeta": {
@@ -328,11 +328,11 @@
       },
       "small": {
         "displayName": "Small UI",
-        "purpose": "Search inputs, toolbar context, and explanatory copy."
+        "purpose": "Search inputs, toolbar context, connection selection, and explanatory copy."
       },
       "label": {
         "displayName": "Secondary label",
-        "purpose": "Status bars, counts, and secondary metadata."
+        "purpose": "Status bars, source captions, counts, and secondary metadata."
       },
       "code": {
         "displayName": "SQL and gutter",
@@ -352,7 +352,7 @@
       {
         "name": "dialog",
         "value": "0 16px 48px #0008",
-        "purpose": "Rename and row-detail native dialogs."
+        "purpose": "Connection, rename, and row-detail native dialogs."
       },
       {
         "name": "mobile-explorer",
@@ -377,6 +377,10 @@
         "value": "700px"
       },
       {
+        "name": "stacked-connection-manager",
+        "value": "620px"
+      },
+      {
         "name": "wrapped-editor-context",
         "value": "420px"
       }
@@ -384,10 +388,10 @@
   },
   "components": [
     {
-      "name": "Execute / Save",
+      "name": "Execute / Save / Connect",
       "kind": "button",
       "refersTo": "button-primary",
-      "description": "Compact green primary action with the source hover, focus, and disabled states.",
+      "description": "Compact green primary action shared by execution, rename, and connection forms; source hover, focus, and disabled states.",
       "html": "<button class=\"ds-primary\" type=\"button\"><svg viewBox=\"0 0 20 20\" aria-hidden=\"true\"><path d=\"m6 4 10 6-10 6Z\"/></svg><span>Execute</span></button>",
       "css": ".ds-primary{display:inline-flex;align-items:center;justify-content:center;gap:5px;min-height:28px;padding:4px 9px;border:1px solid #527d57;border-radius:4px;background:#344c38;color:#c9eccb;font:13px/1.5 -apple-system, BlinkMacSystemFont, \"Segoe UI\", sans-serif;cursor:pointer;}.ds-primary svg{width:15px;height:15px;fill:currentColor;stroke:none;}.ds-primary:hover:not(:disabled){background:#3b5c40;}.ds-primary:focus-visible{outline:2px solid var(--blue, #88b4fa);outline-offset:-2px;}.ds-primary:disabled{opacity:.45;cursor:default;}"
     },
@@ -422,11 +426,27 @@
       "description": "Static source-derived grid sample. Production controller supplies returned rows, sorting, and row detail. Sample values are preview-only.",
       "html": "<div class=\"ds-grid-wrap\"><table class=\"ds-grid\" aria-label=\"Query results\"><thead><tr><th class=\"ds-row-number\">#</th><th><button class=\"ds-grid-heading\" type=\"button\">id</button></th><th><button class=\"ds-grid-heading\" type=\"button\">name</button></th></tr></thead><tbody><tr><td class=\"ds-row-number\"><button class=\"ds-row-open\" type=\"button\" aria-label=\"Open row 1\">1</button></td><td>42</td><td>Sample value</td></tr><tr><td class=\"ds-row-number\"><button class=\"ds-row-open\" type=\"button\" aria-label=\"Open row 2\">2</button></td><td>43</td><td><span class=\"ds-null\">NULL</span></td></tr></tbody></table></div>",
       "css": ".ds-grid-wrap{overflow:auto;background:var(--editor, #1e1f22);}.ds-grid{border-collapse:separate;border-spacing:0;min-width:100%;width:max-content;color:var(--text, #dfe1e5);font:12px/1.5 var(--mono, \"JetBrains Mono\", \"SFMono-Regular\", Consolas, \"Liberation Mono\", monospace);font-variant-numeric:tabular-nums;}.ds-grid th,.ds-grid td{height:29px;padding:4px 12px;border-right:1px solid #34363b;border-bottom:1px solid #303237;text-align:left;max-width:420px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}.ds-grid th{position:sticky;top:0;z-index:1;padding:0;background:var(--chrome, #2b2d30);color:#c9cdd6;font-weight:500;}.ds-grid-heading,.ds-row-open{display:block;width:100%;border:1px solid transparent;border-radius:0;background:transparent;color:inherit;font:inherit;cursor:pointer;}.ds-grid-heading{padding:6px 12px;text-align:left;}.ds-grid .ds-row-number{position:sticky;left:0;min-width:48px;width:48px;padding:0;text-align:right;background:var(--tree, #25262a);color:var(--muted, #a8adb8);}.ds-row-open{padding:4px 9px;text-align:right;}.ds-grid thead .ds-row-number{z-index:2;padding:4px 9px;}.ds-grid tbody tr:hover td{background:#283344;}.ds-grid tbody tr:focus-within td{background:var(--selection, #2d4264);}.ds-grid-heading:hover:not(:disabled),.ds-row-open:hover:not(:disabled){background:#393c43;}.ds-grid-heading:focus-visible,.ds-row-open:focus-visible{outline:2px solid var(--blue, #88b4fa);outline-offset:-2px;}.ds-null{color:#a4a9b5;font-style:italic;}"
+    },
+    {
+      "name": "Data Source Root",
+      "kind": "nav",
+      "refersTo": "source-row",
+      "description": "Source-derived selected root with metadata caption and per-source console/settings controls. The name and state below are preview values; production controls are controller-backed.",
+      "html": "<section class=\"ds-source-root\" aria-label=\"Local PostgreSQL \u00b7 PostgreSQL\"><div class=\"ds-source-row ds-source-selected\"><button class=\"ds-source-disclosure\" type=\"button\" aria-label=\"Expand Local PostgreSQL\" aria-expanded=\"true\"><svg viewBox=\"0 0 20 20\" aria-hidden=\"true\"><path d=\"m7 4 6 6-6 6\"/></svg></button><button class=\"ds-source-name\" type=\"button\"><svg viewBox=\"0 0 20 20\" aria-hidden=\"true\"><ellipse cx=\"10\" cy=\"4.5\" rx=\"6\" ry=\"2.5\"/><path d=\"M4 4.5v11c0 3.3 12 3.3 12 0v-11M4 10c0 3.3 12 3.3 12 0\"/></svg><span>Local PostgreSQL</span></button><button class=\"ds-source-icon\" type=\"button\" aria-label=\"New SQL console for Local PostgreSQL\"><svg viewBox=\"0 0 20 20\" aria-hidden=\"true\"><path d=\"m6 5-4 5 4 5m8-10 4 5-4 5M11 3 9 17\"/></svg></button><button class=\"ds-source-icon\" type=\"button\" aria-label=\"Edit Local PostgreSQL\"><svg viewBox=\"0 0 20 20\" aria-hidden=\"true\"><path d=\"M8 2h4l.7 2.1 2 .9 2-.8 2.1 2.1-.8 2 1 2 .9.7v4l-2.1.7-1 2-2-.8-2 .9H8l-.7-2.1-2-.9-2 .8-2.1-2.1.8-2-1-2-.9-.7v-4l2.1-.7 1-2 2 .8 2-.9Z\"/><circle cx=\"10\" cy=\"10\" r=\"2.5\"/></svg></button></div><p class=\"ds-source-caption\">PostgreSQL \u00b7 Configured</p></section>",
+      "css": ".ds-source-root{background:var(--tree, #25262a);color:var(--text, #dfe1e5);font:13px/1.5 -apple-system, BlinkMacSystemFont, \"Segoe UI\", sans-serif;}.ds-source-row{display:flex;align-items:center;min-height:29px;padding:0 6px;gap:2px;}.ds-source-row:hover{background:#303238;}.ds-source-row.ds-source-selected{background:var(--selection, #2d4264);}.ds-source-root button{border:1px solid transparent;background:transparent;color:inherit;font:inherit;cursor:pointer;}.ds-source-root button:hover:not(:disabled){background:#393c43;}.ds-source-root button:focus-visible{outline:2px solid var(--blue, #88b4fa);outline-offset:-2px;}.ds-source-root button:disabled{opacity:.45;cursor:default;}.ds-source-root svg{fill:none;stroke:currentColor;stroke-width:1.4;stroke-linecap:round;stroke-linejoin:round;flex-shrink:0;}.ds-source-disclosure{display:grid;place-items:center;flex-shrink:0;width:22px;height:26px;padding:2px;border-radius:2px;}.ds-source-disclosure svg{width:12px;height:12px;}.ds-source-disclosure[aria-expanded=\"true\"] svg{transform:rotate(90deg);}.ds-source-name{display:flex;align-items:center;gap:6px;flex:1;min-width:0;padding:3px 2px;border-radius:2px;text-align:left;}.ds-source-name span{overflow:hidden;white-space:nowrap;text-overflow:ellipsis;}.ds-source-name svg{width:15px;height:15px;color:var(--blue, #88b4fa);}.ds-source-root .ds-source-icon{display:inline-flex;align-items:center;justify-content:center;flex-shrink:0;width:26px;height:26px;padding:4px;border-radius:4px;color:var(--muted, #a8adb8);}.ds-source-icon svg{width:14px;height:14px;}.ds-source-caption{margin:0 10px 3px 32px;color:var(--muted, #a8adb8);font-size:12px;overflow-wrap:anywhere;line-height:1.5;}"
+    },
+    {
+      "name": "Console Connection",
+      "kind": "input",
+      "refersTo": "console-connection",
+      "description": "Native select for the active console connection. Production state disables it during execution and updates dialect/status; preview names are illustrative.",
+      "html": "<div class=\"ds-console-connection-toolbar\"><label class=\"ds-console-connection-label\" for=\"ds-console-connection\">Connection</label><select id=\"ds-console-connection\" class=\"ds-console-connection\" aria-label=\"Connection for this SQL console\"><option value=\"\">Select connection</option><option value=\"preview-pg\" selected>Local PostgreSQL \u00b7 PostgreSQL</option><option value=\"preview-my\">Local MySQL \u00b7 MySQL (disconnected)</option></select></div>",
+      "css": ".ds-console-connection-toolbar{display:flex;align-items:center;flex-wrap:wrap;gap:6px;padding:5px 10px;background:#242529;border-bottom:1px solid #303136;font:13px/1.5 -apple-system, BlinkMacSystemFont, \"Segoe UI\", sans-serif;}.ds-console-connection-label{font-size:12px;color:var(--muted, #a8adb8);}.ds-console-connection{flex:0 1 240px;min-width:90px;max-width:280px;width:auto;height:28px;border:1px solid var(--border, #393b40);border-radius:4px;background:var(--editor, #1e1f22);color:var(--text, #dfe1e5);font:12px/1.5 -apple-system, BlinkMacSystemFont, \"Segoe UI\", sans-serif;text-overflow:ellipsis;}.ds-console-connection:focus-visible{outline:2px solid var(--blue, #88b4fa);outline-offset:-2px;}@media(max-width:700px){.ds-console-connection-toolbar{gap:2px;padding:5px 6px;}.ds-console-connection{flex:1 1 120px;max-width:100%;}.ds-console-connection-label{position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%);}}"
     }
   ],
   "narrative": {
     "northStar": "DataGrip New UI workbench",
-    "overview": "The implemented world follows the user's pinned dark DataGrip New UI reference: graphite tool chrome, darker editing surfaces, restrained state colors, and compact controls. The interface gives database objects, SQL, and returned data a shared working frame. System UI text carries controls and navigation; monospace carries SQL, data, and measurements. There is no display type role.\n\nDurable product commitments are the GridBase name, the dark IDE character, and keeping objects, SQL, and results within one working screen. This record describes `public/styles.css`, `public/index.html`, and the component and layout behavior in `public/app.js`. It records implementation evidence, not visual approval: the browser host was unavailable, desktop and mobile captures are missing, and the finish review requires recapture. Apparent legibility and responsive fit still need rendered verification; source values are not proof of that verification.",
+    "overview": "The implemented world follows the user's pinned dark DataGrip New UI reference: graphite tool chrome, darker editing surfaces, restrained state colors, and compact controls. The interface gives multiple data sources, their database objects, SQL, and returned data a shared working frame. Each console carries its own connection, dialect, and results. System UI text carries controls and navigation; monospace carries SQL, data, and measurements. There is no display type role.\n\nDurable product commitments are the GridBase name, the dark IDE character, and keeping objects, SQL, and results within one working screen. This record describes `public/styles.css`, `public/index.html`, and the component and layout behavior in `public/app.js`. It records implementation evidence, not visual approval: the browser host was unavailable, desktop and mobile captures are missing, and the finish review requires recapture. Apparent legibility and responsive fit still need rendered verification; source values are not proof of that verification.",
     "keyCharacteristics": [
       "Dense pane boundaries and aligned toolbars rather than spacious dashboard cards.",
       "Blue selection and focus, green execution and connection success, coral errors.",

@@ -26,7 +26,14 @@ public record ConnectionProfile(DatabaseType type, String name, String jdbcUrl, 
     }
 
     public String redactedUrl() {
-        return jdbcUrl.replaceAll("(?i)((?:^|[;?&])(password|token|secret)=)[^;&]*", "$1••••••");
+        // JDBC parameters and authority user info may contain arbitrary driver-specific secrets.
+        String target = jdbcUrl.replaceAll("(//)[^/?;]*@", "$1••••••@");
+        int end = target.length();
+        for (char separator : new char[]{'?', ';', '#'}) {
+            int index = target.indexOf(separator);
+            if (index >= 0) end = Math.min(end, index);
+        }
+        return target.substring(0, end);
     }
 
     public String safeJson() {
@@ -53,15 +60,6 @@ public record ConnectionProfile(DatabaseType type, String name, String jdbcUrl, 
         }
         if (name.isBlank()) name = type.label();
         return new ConnectionProfile(type, name, jdbcUrl, username, password);
-    }
-
-    public static ConnectionProfile fromEnvironment(DatabaseType type, String jdbcUrl, String username, String password) {
-        if (jdbcUrl == null || jdbcUrl.isBlank() || username == null || username.isBlank() || password == null || password.isBlank()) {
-            return null;
-        }
-        DatabaseType resolved = type == null ? DatabaseType.infer(jdbcUrl) : type;
-        if (resolved == null) throw new IllegalArgumentException("Tipe database tidak dapat ditentukan dari JDBC URL.");
-        return new ConnectionProfile(resolved, resolved.label(), jdbcUrl.trim(), username.trim(), password);
     }
 
     static String buildUrl(DatabaseType type, String host, String portValue, String database, boolean ssl) {

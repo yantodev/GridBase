@@ -32,3 +32,19 @@ Query collection no longer imposes a ten-row cap on SQL with an explicit outer L
 Regression evidence includes Java JDBC fixture queries with LIMIT 20, 75, 0, missing LIMIT, and LIMIT NULL; SQL limit masking/subquery/CTE checks in Java and Node; Node handler contract tests; and controller checks for two pages of 20 rows and five pages of 50 rows. A synthetic JDBC driver was also used through the actual Java HTTP endpoint: LIMIT 20/75/0 and missing/NULL limit returned 20/75/0/50/50 rows respectively, with the GridBase HTML title served. No actual database was accessed by these tests.
 
 The final independent source review confirmed the quoted-identifier LIMIT correction. Quoted table and quoted ORDER BY cases preserve LIMIT 75, and quoted-table LIMIT NULL becomes LIMIT 50. Final automated and synthetic HTTP checks passed.
+
+
+## Multiple connections in the left Database panel
+
+The Add connection action and connection settings now live in the left Database panel. Data sources have independent metadata trees and loading/error states. Each SQL console persists its connection ID and shows a connection selector; same-named tables in different sources open separate consoles. Changing explorer selection does not change existing console routing. Missing or explicitly unbound console connections remain disabled across refresh/reload.
+
+The Java backend registers immutable per-connection JDBC services with stable IDs. Query and metadata requests capture the selected service. Disconnect removes only that source, unknown IDs return 404 without fallback, and failed reconnects preserve the previous profile. Passwords and JDBC URLs are excluded from saved browser profiles; safe API targets omit JDBC auth parameters and user info.
+
+Verification: the full Node and Java suites pass. Controller fixtures cover two dialects, equal source/table names, originating query/history/draft association, disconnected and explicitly unbound consoles, reconnect locking, per-connection metadata and out-of-order refreshes, and ten-row result pagination. Real Java HTTP route tests use synthetic JDBC for two connection types, reads/writes, metadata, default limits, reconnect failures, disconnect isolation and unknown-ID rejection. These do not establish live multi-database access.
+
+Fresh CUA inventory still reports browser access host unavailable. The independent finish reviewer returned **recapture** because desktop/mobile captures remain unavailable. No rendered verification or visual approval is claimed.
+
+
+## Server settings only; no automatic Spark source
+
+The .env and .env.example now contain only PORT=4173, QUERY_TIMEOUT_MS=30000 and DEFAULT_QUERY_LIMIT=50. Compose no longer forwards database credentials or database type. Java AppConfig loads server settings only, and ConnectionRegistry starts empty even if obsolete Spark credentials remain in the file or process environment. Users connect all data sources from the left Database panel. Browser profiles remain available as disconnected profiles after a server restart. Regression checks cover old file/process settings and explicit runtime connections.

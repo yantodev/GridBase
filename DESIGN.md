@@ -115,6 +115,18 @@ components:
     height: "38px"
   console-tab-active:
     backgroundColor: "{colors.editor}"
+  source-row:
+    textColor: "{colors.text}"
+    typography: "{typography.body}"
+    padding: "0 6px"
+  source-row-selected:
+    backgroundColor: "{colors.selection}"
+  console-connection:
+    backgroundColor: "{colors.editor}"
+    textColor: "{colors.text}"
+    typography: "{typography.small}"
+    rounded: "{rounded.control}"
+    height: "28px"
   sql-editor:
     backgroundColor: "{colors.editor}"
     textColor: "{colors.text}"
@@ -131,6 +143,12 @@ components:
     textColor: "{colors.text}"
     rounded: "{rounded.dialog}"
     padding: "20px"
+  connection-dialog:
+    backgroundColor: "{colors.chrome}"
+    textColor: "{colors.text}"
+    rounded: "{rounded.dialog}"
+    padding: "20px"
+    width: "min(700px, calc(100% - 32px))"
 ---
 
 # Design System: GridBase
@@ -139,7 +157,7 @@ components:
 
 **Creative North Star: "DataGrip New UI workbench"**
 
-The implemented world follows the user's pinned dark DataGrip New UI reference: graphite tool chrome, darker editing surfaces, restrained state colors, and compact controls. The interface gives database objects, SQL, and returned data a shared working frame. System UI text carries controls and navigation; monospace carries SQL, data, and measurements. There is no display type role.
+The implemented world follows the user's pinned dark DataGrip New UI reference: graphite tool chrome, darker editing surfaces, restrained state colors, and compact controls. The interface gives multiple data sources, their database objects, SQL, and returned data a shared working frame. Each console carries its own connection, dialect, and results. System UI text carries controls and navigation; monospace carries SQL, data, and measurements. There is no display type role.
 
 Durable product commitments are the GridBase name, the dark IDE character, and keeping objects, SQL, and results within one working screen. This record describes `public/styles.css`, `public/index.html`, and the component and layout behavior in `public/app.js`. It records implementation evidence, not visual approval: the browser host was unavailable, desktop and mobile captures are missing, and the finish review requires recapture. Apparent legibility and responsive fit still need rendered verification; source values are not proof of that verification.
 
@@ -157,12 +175,12 @@ Graphite neutrals provide the structure; cool blue identifies interaction, while
 ### Primary
 
 - **Blue:** Focus outlines, active-tab underlines, database and table icons.
-- **Selection:** Active tool-rail background and keyboard-focused result rows.
+- **Selection:** Active tool-rail background, selected data-source root, and keyboard-focused result rows.
 
 ### Secondary
 
 - **Green:** Configured connection status dot.
-- **Action / Action Text / Action Border / Action Hover:** The Execute and Save control family; a subdued green fill with pale green text and a visible edge.
+- **Action / Action Text / Action Border / Action Hover:** The Execute, Save, and Connect control family; a subdued green fill with pale green text and a visible edge.
 - **Error:** Connection, metadata, and execution error text and status dots.
 - **SQL Keyword / String / Number / Comment / Identifier:** Syntax roles inside the editor. These are code-reading colors, not a general decorative palette.
 
@@ -211,9 +229,14 @@ The workbench stacks a console strip (38px), editor, results splitter (5px), and
 
 Controls primarily use small even spacing steps from the frontmatter; local (5px), (7px), and (9px) adjustments are also present. Pane and toolbar inset commonly falls between (8–14px). Explorer rows are at least (29px) tall. Results cells use a declared height (29px) and compact padding, with sticky column headings and row numbers. Long tabs and database names truncate; tabs and results scroll inside their own regions.
 
+The Database view keeps Add connection and the settings control in a compact left toolbar above object filtering and the data-source roots. Each source groups its own schema tree and compact metadata caption. The editor toolbar wraps at every width to accommodate its per-console connection select; that field has a preferred flex basis (240px), minimum width (90px), maximum width (280px), and height (28px).
+
+The connection manager is a native dialog with width `min(700px, calc(100% - 32px))`, maximum height `min(760px, calc(100% - 32px))`, and internal scrolling. Its saved-source list (205px) sits alongside a flexible field column with a gap (18px). The saved list starts at a minimum height (280px); host and port share a field grid with a port column (120px) and gap (10px). Action buttons wrap.
+
 - At widths up to (960px), the keyboard execution hint, project name, and title divider are hidden.
-- At widths up to (700px), the explorer becomes a fixed overlay below the title bar and above the status bar. Its left edge remains after the rail (42px), and its width is `min(300px, calc(100vw - 54px))`. The sidebar splitter disappears, the shell minimum height becomes (560px), and the workbench occupies the remaining column. The overlay starts closed, dims the workbench, and makes the workbench inert while open. Tool buttons, backdrop, and Escape close it and restore focus to its rail button. Editor controls wrap; gutters, dock tabs, labels, and padding compact. The page-size label and server-state text hide.
-- At widths up to (420px), the product icon hides, the connection label shortens, context moves to a full toolbar row, the toolbar minimum becomes (62px), and the editor minimum becomes (165px).
+- At widths up to (700px), the explorer becomes a fixed overlay below the title bar and above the status bar. Its left edge remains after the rail (42px), and its width is `min(300px, calc(100vw - 54px))`. The sidebar splitter disappears, the shell minimum height becomes (560px), and the workbench occupies the remaining column. The overlay starts closed, dims the workbench, and makes the workbench inert while open. Tool buttons, backdrop, and Escape close it and restore focus to its rail button. Gutters, dock tabs, labels, and padding compact. The connection select grows from a flex basis (120px), its visible label becomes visually hidden while remaining associated, and nonempty table context moves to a full toolbar row. The page-size label and server-state text hide.
+- At widths up to (620px), the connection manager becomes one column, the saved-source list uses minimum height (100px) and maximum height (150px), and dialog padding reduces to (14px).
+- At widths up to (420px), the product icon hides, the connection label shortens, the toolbar minimum becomes (62px), and the editor minimum becomes (165px).
 
 These breakpoints describe source behavior. Desktop and mobile fit remain unverified without the missing captures.
 
@@ -224,7 +247,7 @@ Working panes are flat and separated by tone and thin rules. Shadows distinguish
 ### Shadow Vocabulary
 
 - **Completion:** `0 8px 25px #0006` beneath SQL suggestions.
-- **Dialog:** `0 16px 48px #0008` beneath rename and row-detail dialogs; the native dialog backdrop uses `#0008`.
+- **Dialog:** `0 16px 48px #0008` beneath connection, rename, and row-detail dialogs; the native dialog backdrop uses `#0008`.
 - **Mobile Explorer:** `8px 0 24px #0006` beside the fixed explorer; its backdrop uses `#0006`.
 
 The loading result icon pulses over (1.4s) with `ease-in-out`, reaching opacity (.3) halfway through the loop. Reduced-motion preference removes that animation. Resize and selection changes are direct.
@@ -245,9 +268,9 @@ Single-pixel borders mark fields, grids, and pane divisions. The active console 
 
 Compact toolbar controls keep actions adjacent to their working surface.
 
-- **Primary:** Execute and Save share the green action family, control radius, padding (4px 9px), and minimum height (28px).
+- **Primary:** Execute, Save, and Connect share the green action family, control radius, padding (4px 9px), and minimum height (28px).
 - **Tool:** Transparent resting fill, padding (4px 7px), minimum height (28px), and the shared hover fill.
-- **Icon:** Square (28px) controls with padding (4px); close buttons inside console tabs shrink to (24px).
+- **Icon:** Square (28px) controls with padding (4px); per-source console/settings controls shrink to (26px), and close buttons inside console tabs shrink to (24px).
 - **Text:** Small utility actions use (12px) text and a minimum height (27px).
 - **Focus / Disabled:** The shared focus outline is blue (2px), offset inward (-2px). Disabled controls use opacity (.45) and the default cursor. Execute remains in the editor toolbar at narrow widths.
 
@@ -258,7 +281,8 @@ Dark, bordered controls remain visually attached to their toolbars.
 - **Style:** Editor-colored fill, main text, border-colored edge, control radius, and padding (5px 8px).
 - **Search:** Explorer search is (28px) tall; returned-row search is (26px) tall. Placeholder text uses Muted at full opacity.
 - **Focus:** Shared blue inset outline. The SQL textarea instead uses a single inset focus edge (`#5678ab`).
-- **Errors:** Connection and execution errors appear in their corresponding notices, states, and output; no field-specific error variant is implemented.
+- **Connection Select:** The per-console native select shares the field fill, border, control radius, and small UI text. Its options combine connection name, database type, and disconnected state. It is disabled while that console executes.
+- **Errors:** Connection and execution errors appear in their corresponding notices, form status, states, and output; no field-specific error variant is implemented. Nonempty connection-form status uses the existing amber notice text (`#f2cc8f`), including test feedback; it has no separate success style.
 
 ### Navigation
 
@@ -267,7 +291,7 @@ Rail and tabs describe working context rather than page hierarchy.
 - **Tool Rail:** Graphite strip with muted SVG buttons (32px × 34px). The selected tool uses Selection and pale blue foreground (`#c6dcff`). The same rail opens or closes the explorer and history views.
 - **Console Tabs:** Rectangular tabs (110–230px wide) with truncating names, a blue active underline, and close controls. Tabs scroll horizontally. Arrow keys and Home/End move the active tab; close remains disabled while its console runs.
 - **Dock Tabs:** Results and Output use muted resting text, main active text, a subtly raised tone, and the same blue bottom indicator. They remain attached to their shared results dock.
-- **Explorer:** Separate disclosure and object-name controls expose schema, table, and column levels with indentation, metadata loading/error copy, and name truncation. Tables use blue icons; schema icons use a restrained violet (`#b2acdf`).
+- **Explorer:** The Data sources list starts with named source roots, each with disclosure, database icon, new-console control, settings control, and a database-type/state caption. Selected roots use Selection; source controls use muted icons (14px) inside square buttons (26px). Source names truncate, captions wrap, and adjacent source groups separate by (8px). Connected roots expose independent schema, table, and column loading/error states. Nested left insets are (24px), (40px), and (78px), respectively. Tables and source icons use Blue; schema icons use a restrained violet (`#b2acdf`). Disconnected sources retain an explicit reconnect caption and disable their new-console control.
 
 ### Containers / Dialogs
 
@@ -275,6 +299,7 @@ Persistent content lives in flat panes; focused tasks use floating dialogs.
 
 - **Panes:** Edge-aligned backgrounds and single-pixel divisions; no card grid is implemented.
 - **Completion:** Compact floating panel with a border, the completion radius, padding (8px), and a native monospace suggestion list. Enter inserts; Escape closes and returns focus to SQL.
+- **Connections:** The Database toolbar opens a connection manager using the existing chrome, dialog radius, shadow, and field language. Saved sources appear in a bordered list with name, database type, and remove control; the form uses labeled fields and a checkbox. PostgreSQL, MySQL, and Spark Thrift / Hive share the same controls, with type-dependent fields. Test connection is secondary; Connect is primary. Pending requests expose text and disable test/connect/disconnect actions. Per-source settings open the corresponding profile. Layout dimensions and its one-column breakpoint are recorded in Layout.
 - **Rename:** Chrome-colored native dialog with the dialog radius, padding (20px), and width `min(420px, calc(100% - 32px))`.
 - **Row Detail:** Wider dialog, capped at (800px), with a scrollable value table capped at (70vh). Long field names and values wrap; field headers occupy (30%) of the table width.
 
@@ -283,6 +308,8 @@ Persistent content lives in flat panes; focused tasks use floating dialogs.
 The editor is a synchronized syntax layer and textarea, paired with a noninteractive line-number gutter. Selection, caret, scrolling, and shared metrics keep the two layers aligned. SQL stays on unwrapped lines. The gutter is (49px) wide on desktop and (35px) on narrow screens.
 
 The visible SQL uses the syntax color roles in the frontmatter; the textarea itself has transparent text and a visible caret. In forced-colors mode the syntax layer hides and the textarea returns to `CanvasText`. Tab indents, Escape moves focus to Format, and Ctrl/Cmd+Enter executes the selected SQL or statement at the caret. The source limits drafts to (20,000) characters, including programmatic editor changes.
+
+The active console's connection select determines the title-bar connection name/status, editor dialect label, and footer connection status. Table-specific context displays its namespace and table separately from the selected connection. Changing a console's connection clears its previous results and table context; it does not change other consoles. Missing or disconnected sources are explicit select options/states and keep Execute disabled.
 
 ### Results Grid / Output
 

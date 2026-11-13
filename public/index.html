@@ -32,7 +32,6 @@
       <svg class="product-icon" aria-hidden="true"><use href="#i-database"/></svg>
       <h1>GridBase</h1><span class="title-divider"></span><span id="project-name" class="project-name">s3tables</span>
       <span id="connection-status" class="connection-status" role="status"><span class="status-dot"></span><span id="connection-label">Checking server…</span></span>
-      <button id="manage-connections" class="icon-button" type="button" title="Manage database connections" aria-label="Manage database connections"><svg><use href="#i-settings"/></svg></button>
       <button id="retry-connection" class="icon-button" type="button" title="Check connection" aria-label="Check connection"><svg><use href="#i-refresh"/></svg></button>
     </header>
     <nav class="tool-rail" aria-label="Tool windows">
@@ -43,8 +42,9 @@
     <aside id="sidebar" class="sidebar" aria-label="Database explorer">
       <header class="pane-heading"><h2 id="sidebar-heading">Database</h2><div class="button-group"><button id="refresh-metadata" class="icon-button" type="button" title="Refresh metadata" aria-label="Refresh metadata"><svg><use href="#i-refresh"/></svg></button><button id="hide-sidebar" class="icon-button" type="button" title="Hide tool window" aria-label="Hide tool window"><svg><use href="#i-panel"/></svg></button></div></header>
       <div id="database-view" class="sidebar-view">
+        <div class="database-actions"><button id="add-connection" class="tool-button" type="button"><svg aria-hidden="true"><use href="#i-plus"/></svg><span>Add connection</span></button><button id="manage-connections" class="icon-button" type="button" title="Manage connections" aria-label="Manage connections"><svg><use href="#i-settings"/></svg></button></div>
         <label class="search-field"><svg aria-hidden="true"><use href="#i-search"/></svg><input id="object-filter" type="search" placeholder="Filter loaded objects" aria-label="Filter loaded database objects" autocomplete="off" /></label>
-        <div class="catalog-root"><svg aria-hidden="true"><use href="#i-database"/></svg><strong id="catalog-name">Database</strong><span id="schema-count"></span></div>
+        <div class="catalog-root"><strong>Data sources</strong><span id="schema-count"></span></div>
         <nav id="schema-list" class="schema-list" aria-label="Database objects" aria-busy="true"><p class="pane-note">Loading schemas…</p></nav>
       </div>
       <div id="history-view" class="sidebar-view" hidden><div class="history-heading"><span>Recent executions · <span id="history-count">0</span>/5</span><button id="clear-history" class="text-button" type="button">Clear</button></div><div id="history-list" class="history-list"></div></div>
@@ -60,7 +60,7 @@
           <span class="toolbar-divider"></span>
           <button id="format-query" class="tool-button" type="button" title="Format SQL"><svg aria-hidden="true"><use href="#i-format"/></svg><span>Format</span></button>
           <button id="rename-console" class="icon-button" type="button" title="Rename console" aria-label="Rename console"><svg><use href="#i-edit"/></svg></button>
-          <span id="console-context" class="console-context">Spark SQL</span><span class="execute-shortcut">Ctrl / ⌘ + Enter</span>
+          <label class="console-connection-label" for="console-connection">Connection</label><select id="console-connection" class="console-connection" aria-label="Connection for this SQL console"></select><span id="console-context" class="console-context"></span><span class="execute-shortcut">Ctrl / ⌘ + Enter</span>
         </div>
         <div id="editor-body" class="editor-body">
           <div id="line-numbers" class="line-numbers" aria-hidden="true">1</div>
@@ -68,7 +68,7 @@
         </div>
         <p id="editor-help" class="sr-only">Ctrl or Command Enter executes the selected SQL or the statement at the caret. Tab indents; Escape moves focus to the Format button so Tab can navigate other controls. Ctrl Space offers SQL and loaded object suggestions.</p>
         <div id="completion-panel" class="completion-panel" hidden><label for="completion-select">SQL suggestions</label><select id="completion-select" size="5" aria-label="SQL suggestions"></select><div class="completion-actions"><span>Enter to insert · Esc to close</span><button id="close-completion" class="text-button" type="button">Close</button></div></div>
-        <footer class="editor-status"><span>Spark SQL <span class="subtle-separator">/</span> <span id="editor-size">0 characters</span></span><span id="caret-position">Ln 1, Col 1</span></footer>
+        <footer class="editor-status"><span><span id="editor-dialect">SQL</span> <span class="subtle-separator">/</span> <span id="editor-size">0 characters</span></span><span id="caret-position">Ln 1, Col 1</span></footer>
       </section>
       <div id="results-resizer" class="results-resizer" role="separator" tabindex="0" aria-label="Editor height" aria-orientation="horizontal" aria-valuemin="20" aria-valuemax="75" aria-valuenow="45"></div>
       <section class="results-dock" aria-label="Query results and output">
@@ -86,7 +86,7 @@
   </div>
   <dialog id="connection-dialog" class="workbench-dialog connection-dialog" aria-labelledby="connection-heading">
     <form id="connection-form">
-      <header class="dialog-heading"><div><h2 id="connection-heading">Database connections</h2><p class="dialog-subtitle">Connect seperti DataGrip. Password hanya dikirim saat test/connect dan tidak disimpan di browser.</p></div><button id="close-connection" class="icon-button" type="button" aria-label="Close connection manager"><svg><use href="#i-close"/></svg></button></header>
+      <header class="dialog-heading"><div><h2 id="connection-heading">Database connections</h2><p class="dialog-subtitle">Tambahkan beberapa koneksi. Password dan JDBC URL tidak disimpan di browser; koneksi aktif disimpan di memori server.</p></div><button id="close-connection" class="icon-button" type="button" aria-label="Close connection manager"><svg><use href="#i-close"/></svg></button></header>
       <div class="connection-layout">
         <aside class="saved-connections"><div class="saved-heading"><span>Saved connections</span><button id="new-connection" class="text-button" type="button">New</button></div><div id="saved-connection-list"></div></aside>
         <div class="connection-fields">
@@ -101,7 +101,7 @@
           <p id="connection-form-status" class="form-status" role="status" aria-live="polite"></p>
         </div>
       </div>
-      <div class="dialog-actions"><button id="test-connection" class="tool-button" type="button">Test connection</button><button id="cancel-connection" class="tool-button" type="button">Cancel</button><button id="connect-connection" class="primary-button" type="submit">Connect</button></div>
+      <div class="dialog-actions"><button id="disconnect-connection" class="tool-button" type="button" hidden>Disconnect</button><button id="test-connection" class="tool-button" type="button">Test connection</button><button id="cancel-connection" class="tool-button" type="button">Cancel</button><button id="connect-connection" class="primary-button" type="submit">Connect</button></div>
     </form>
   </dialog>
   <dialog id="rename-dialog" class="workbench-dialog" aria-labelledby="rename-heading"><form id="rename-form"><h2 id="rename-heading">Rename console</h2><label for="console-name">Console name</label><input id="console-name" maxlength="80" required autocomplete="off" /><div class="dialog-actions"><button id="cancel-rename" class="tool-button" type="button">Cancel</button><button class="primary-button" type="submit">Save</button></div></form></dialog>

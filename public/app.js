@@ -14,10 +14,18 @@ function loadHistory() {
 function saveHistory() {
   try { window.localStorage.setItem(HISTORY_STORAGE_KEY, JSON.stringify(state.history)); } catch { setToast('History could not be saved in this browser.'); }
 }
+function safeConnectionProfile(profile) {
+  return {id: typeof profile.id === 'string' && /^[a-zA-Z0-9_-]{1,100}$/.test(profile.id) ? profile.id : C.newTab().id.replace('sql-', 'connection-'),
+    name: profile.name.slice(0, 80), type: profile.type,
+    host: String(profile.host || '').slice(0, 256), port: String(profile.port || '').slice(0, 8),
+    database: String(profile.database || '').slice(0, 256), username: String(profile.username || '').slice(0, 256), ssl: Boolean(profile.ssl)};
+}
 function loadConnections() {
   try {
     const data = JSON.parse(readStorage(CONNECTIONS_STORAGE_KEY) || '[]');
-    return Array.isArray(data) ? data.filter(item => item && typeof item.name === 'string' && typeof item.type === 'string').slice(0, 20) : [];
+    const seen = new Set();
+    return Array.isArray(data) ? data.filter(item => item && typeof item.name === 'string' && ['hive','postgresql','mysql'].includes(item.type))
+      .slice(0, 20).map(safeConnectionProfile).filter(item => !seen.has(item.id) && seen.add(item.id)) : [];
   } catch { return []; }
 }
 function saveConnections() {
@@ -26,13 +34,20 @@ function saveConnections() {
 }
 const state = {
   ...C.restoreDrafts(readStorage(DRAFT_STORAGE_KEY)), history: loadHistory(), connectionProfiles: loadConnections(), configured: false,
-  databaseType: 'hive', catalogName: 's3tables', connectionName: '',
+  connections: new Map(), selectedConnectionId: null, editingConnectionId: null, serverError: '', connectionPending: false,
   sidebarOpen: !window.matchMedia('(max-width: 700px)').matches, tool: 'database',
-  schemas: [], schemaEntries: new Map(), columns: new Map(), metadataLoading: false, metadataError: '',
 };
 const editor = $('#sql-editor');
-let saveTimer, completionRange, metadataVersion = 0;
+let saveTimer, completionRange, connectionCheckVersion = 0;
 const active = () => state.tabs.find(t => t.id === state.activeId);
+function makeConnection(profile, connected = false) {
+  return {...profile, connected, expanded: connected, schemas: [], schemaEntries: new Map(), columns: new Map(), metadataLoading: false, metadataError: '', metadataLoaded: false, version: 0};
+}
+for (const profile of state.connectionProfiles) state.connections.set(profile.id, makeConnection(profile));
+const tabConnection = () => state.connections.get(active()?.connectionId);
+const selectedConnection = () => state.connections.get(state.selectedConnectionId);
+const typeLabel = type => ({postgresql:'PostgreSQL',mysql:'MySQL',hive:'Spark Thrift / Hive'}[type] || 'SQL');
+const metadataUrl = (path, id, params = {}) => path + '?' + new URLSearchParams({connectionId:id, ...params});
 function persistDrafts() {
   window.clearTimeout(saveTimer);
   try { window.localStorage.setItem(DRAFT_STORAGE_KEY, C.serializeDrafts(state)); }
@@ -86,6 +101,7 @@ function updateConnectionType() {
   if (!$('#connection-database').value) $('#connection-database').value = type === 'hive' ? 'default' : type === 'mysql' ? 'mysql' : 'postgres';
 }
 function resetConnectionForm() {
+  state.editingConnectionId = null; $('#disconnect-connection').hidden = true;
   $('#connection-name').value = '';
   $('#database-type').value = 'postgresql';
   $('#connection-host').value = '127.0.0.1';
@@ -100,6 +116,7 @@ function resetConnectionForm() {
   $('#connection-name').focus();
 }
 function loadConnectionForm(profile) {
+  state.editingConnectionId = profile.id; $('#disconnect-connection').hidden = !state.connections.get(profile.id)?.connected;
   $('#connection-name').value = profile.name || '';
   $('#database-type').value = profile.type || 'postgresql';
   $('#connection-host').value = profile.host || '';
@@ -109,7 +126,7 @@ function loadConnectionForm(profile) {
   $('#connection-username').value = profile.username || '';
   $('#connection-password').value = '';
   $('#connection-ssl').checked = Boolean(profile.ssl);
-  $('#connection-form-status').textContent = 'Masukkan password untuk menguji atau menghubungkan.';
+  $('#connection-form-status').textContent = profile.type === 'hive' ? 'Masukkan kembali JDBC URL dan password untuk menghubungkan ulang.' : 'Masukkan password untuk menghubungkan ulang.';
   updateConnectionType();
   $('#connection-password').focus();
 }
@@ -117,6 +134,7 @@ function connectionPayload() {
   const type = connectionType();
   return {
     type,
+    ...(state.editingConnectionId ? {connectionId:state.editingConnectionId} : {}),
     name: $('#connection-name').value.trim(),
     host: $('#connection-host').value.trim(),
     port: $('#connection-port').value.trim(),
@@ -127,12 +145,9 @@ function connectionPayload() {
     ssl: $('#connection-ssl').checked,
   };
 }
-function saveConnectionPayload(payload) {
-  const safe = {
-    name: payload.name, type: payload.type, host: payload.host, port: payload.port,
-    database: payload.database, jdbcUrl: payload.jdbcUrl, username: payload.username, ssl: payload.ssl,
-  };
-  const index = state.connectionProfiles.findIndex(item => item.name === safe.name);
+function saveConnectionPayload(payload, connection) {
+  const safe = safeConnectionProfile({...payload, id:connection.id});
+  const index = state.connectionProfiles.findIndex(item => item.id === safe.id);
   if (index < 0) state.connectionProfiles.unshift(safe);
   else state.connectionProfiles[index] = safe;
   state.connectionProfiles = state.connectionProfiles.slice(0, 20);
@@ -145,30 +160,65 @@ function renderSavedConnections() {
     const row = element('div', 'saved-connection');
     const load = button('', 'saved-connection-main', () => loadConnectionForm(profile));
     load.append(icon('database'), element('span', '', profile.name), element('small', '', profile.type === 'postgresql' ? 'PostgreSQL' : profile.type === 'mysql' ? 'MySQL' : 'Spark Thrift / Hive'));
-    const remove = button('×', 'saved-connection-remove', () => {
-      state.connectionProfiles = state.connectionProfiles.filter(item => item !== profile); saveConnections(); renderSavedConnections();
+    const remove = button('', 'saved-connection-remove', () => {
+      state.connectionProfiles = state.connectionProfiles.filter(item => item.id !== profile.id);
+      if (!state.connections.get(profile.id)?.connected) state.connections.delete(profile.id);
+      if (state.editingConnectionId === profile.id) resetConnectionForm();
+      saveConnections(); renderSavedConnections(); renderExplorer(); updateConnectionUI();
     });
+    remove.append(icon('close'));
     remove.title = 'Remove saved connection'; remove.setAttribute('aria-label', 'Remove ' + profile.name); row.append(load, remove); root.append(row);
   });
 }
-function openConnectionManager() { renderSavedConnections(); resetConnectionForm(); $('#connection-dialog').showModal(); }
+function openConnectionManager(profile) {
+  renderSavedConnections(); resetConnectionForm(); $('#connection-dialog').showModal();
+  if (profile?.id) loadConnectionForm({...state.connectionProfiles.find(item => item.id === profile.id), ...profile});
+  else $('#connection-name').focus();
+}
+function closeConnectionManager() {
+  $('#connection-password').value = ''; $('#connection-jdbc-url').value = ''; $('#connection-dialog').close();
+}
+function setConnectionBusy(busy) {
+  state.connectionPending = busy;
+  for (const id of ['test-connection','connect-connection','disconnect-connection']) $('#' + id).disabled = busy;
+}
+async function disconnectConnection(id) {
+  if (state.connectionPending) return;
+  setConnectionBusy(true);
+  try {
+    await api('/api/connections/disconnect', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({connectionId:id})});
+    ++connectionCheckVersion; $('#retry-connection').disabled = false;
+    const source = state.connections.get(id);
+    if (source) { source.connected = false; source.version++; source.metadataLoading = false; source.metadataLoaded = false; source.schemas = []; source.schemaEntries.clear(); source.columns.clear(); }
+    closeConnectionManager(); updateConnectionUI(); renderExplorer(); setToast('Connection disconnected. Other data sources remain available.');
+  } catch (error) { $('#connection-form-status').textContent = error.message; }
+  finally { setConnectionBusy(false); }
+}
 async function requestConnection(path) {
+  if (state.connectionPending) return null;
   const payload = connectionPayload();
   if (!payload.name || !payload.username || !payload.password || (payload.type === 'hive' && !payload.jdbcUrl)) {
     $('#connection-form-status').textContent = 'Isi nama, username, password, dan detail koneksi terlebih dahulu.'; return null;
   }
-  const testButton = $('#test-connection'), connectButton = $('#connect-connection');
-  testButton.disabled = true; connectButton.disabled = true; $('#connection-form-status').textContent = path.endsWith('/test') ? 'Testing connection…' : 'Connecting…';
+  setConnectionBusy(true); $('#connection-form-status').textContent = path.endsWith('/test') ? 'Testing connection…' : 'Connecting…';
   try {
     const result = await api(path, {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(payload)});
     $('#connection-form-status').textContent = path.endsWith('/test') ? 'Connection successful.' : 'Connected.';
     if (path.endsWith('/connect')) {
-      saveConnectionPayload(payload); $('#connection-dialog').close(); await checkConnection(); setToast('Connected to ' + payload.name + '.');
+      ++connectionCheckVersion; $('#retry-connection').disabled = false; state.serverError = '';
+      const connection = result.connection;
+      saveConnectionPayload(payload, connection);
+      const previous = state.connections.get(connection.id); if (previous) previous.version++;
+      const source = makeConnection(connection, true); state.connections.set(source.id, source); state.selectedConnectionId = source.id;
+      closeConnectionManager();
+      if (!active().connectionId && !active().sql.trim()) { active().connectionId = source.id; persistDrafts(); }
+      else addConsole('', undefined, undefined, source.id);
+      updateConnectionUI(); renderExplorer(); await refreshMetadata(source.id); setToast('Connected to ' + payload.name + '.');
     }
     return result;
   } catch (error) {
     $('#connection-form-status').textContent = error.message; return null;
-  } finally { testButton.disabled = false; connectButton.disabled = false; }
+  } finally { setConnectionBusy(false); }
 }
 function updateEditor() {
   const sql = editor.value;
@@ -204,7 +254,7 @@ function renderTabs() {
       select.id = 'tab-' + tab.id; select.dataset.focus = select.id;
       select.setAttribute('role', 'tab'); select.setAttribute('aria-selected', String(selected));
       select.setAttribute('aria-controls', 'console-panel'); select.tabIndex = selected ? 0 : -1;
-      select.title = `${tab.name}${tab.running ? ' · Running…' : ''} (double-click to rename)`;
+      select.title = `${tab.name} · ${state.connections.get(tab.connectionId)?.name || 'No connection'}${tab.running ? ' · Running…' : ''} (double-click to rename)`;
       select.append(icon(tab.source ? 'table' : 'code'), element('span', 'tab-name', tab.name + (tab.running ? ' · Running…' : '')));
       select.addEventListener('dblclick', openRename);
       select.addEventListener('keydown', event => {
@@ -230,15 +280,15 @@ function switchTab(id) {
   editor.setSelectionRange(tab.selectionStart || 0, tab.selectionEnd || 0);
   editor.scrollTop = tab.scrollTop || 0; editor.scrollLeft = tab.scrollLeft || 0;
   $('#completion-panel').hidden = true;
-  $('#console-context').textContent = tab.source ? state.catalogName + ' / ' + tab.source.namespace + ' / ' + tab.source.table : (state.databaseType === 'hive' ? 'Spark SQL' : state.databaseType);
-  $('#console-context').title = $('#console-context').textContent;
+  updateConnectionUI();
   updateEditor(); renderTabs(); renderResults(); updateRunButton(); persistDrafts();
 }
-function addConsole(sql = '', name, source) {
+function addConsole(sql = '', name, source, connectionId = state.selectedConnectionId || active()?.connectionId) {
   if (state.tabs.length >= 20) { setToast('Close a console before opening another (maximum 20).'); return null; }
   rememberEditor();
   const tab = C.newTab(name || 'Console ' + (state.tabs.length + 1), sql);
   if (source) tab.source = source;
+  tab.connectionId = connectionId || '';
   state.tabs.push(tab); switchTab(tab.id); editor.focus(); return tab;
 }
 function closeTab(id) {
@@ -247,7 +297,7 @@ function closeTab(id) {
   if (tab.sql.trim() && !window.confirm(`Close “${tab.name}”? Its SQL draft and results will be removed.`)) return;
   rememberEditor();
   const index = state.tabs.indexOf(tab); state.tabs.splice(index, 1);
-  if (!state.tabs.length) state.tabs.push(C.newTab('Console 1'));
+  if (!state.tabs.length) { const empty = C.newTab('Console 1'); if (state.selectedConnectionId) empty.connectionId = state.selectedConnectionId; state.tabs.push(empty); }
   const target = state.activeId === id ? state.tabs[Math.min(index, state.tabs.length - 1)].id : state.activeId;
   // The active draft was already captured before removing its tab.
   state.activeId = target; editor.value = active().sql; switchTab(target);
@@ -257,32 +307,64 @@ function openRename() {
   $('#console-name').value = active().name; $('#rename-dialog').showModal(); $('#console-name').select();
 }
 function updateRunButton() {
-  $('#run-query').disabled = !state.configured || Boolean(active()?.running);
+  $('#run-query').disabled = !tabConnection()?.connected || Boolean(active()?.running);
   $('#run-query').querySelector('span').textContent = active()?.running ? 'Executing…' : 'Execute';
   $('#console-panel').setAttribute('aria-busy', String(Boolean(active()?.running)));
+  $('#console-connection').disabled = Boolean(active()?.running);
+}
+function updateConnectionUI() {
+  const source = tabConnection(), connected = Boolean(source?.connected), tab = active();
+  state.configured = [...state.connections.values()].some(item => item.connected);
+  const status = $('#connection-status');
+  status.className = 'connection-status' + (connected ? ' is-configured' : ' is-error');
+  $('#connection-label').textContent = state.serverError ? 'Offline' : connected ? 'Connected' : tab?.connectionId ? 'Disconnected' : 'Not configured';
+  status.title = source ? source.name + ' · ' + typeLabel(source.type) : 'Select a connection for this console';
+  $('#project-name').textContent = source?.name || 'Database workspace';
+  $('#server-state').textContent = connected ? typeLabel(source.type) + ' · Read / write' : 'No console connection';
+  $('#editor-dialect').textContent = source ? typeLabel(source.type) : 'SQL';
+  $('#connection-notice').hidden = connected;
+  $('#connection-notice').textContent = state.serverError || (tab?.connectionId ? 'Koneksi tab ini tidak aktif. Hubungkan kembali dari panel Database atau pilih koneksi untuk tab ini.' : 'Tambahkan koneksi dengan tombol Add connection di panel Database sebelah kiri.');
+  const select = $('#console-connection'); select.replaceChildren();
+  const placeholder = element('option', '', 'Select connection'); placeholder.value = ''; select.append(placeholder);
+  for (const item of state.connections.values()) {
+    const option = element('option', '', item.name + ' · ' + typeLabel(item.type) + (item.connected ? '' : ' (disconnected)'));
+    option.value = item.id; select.append(option);
+  }
+  if (tab?.connectionId && !source) { const missing = element('option', '', 'Unavailable connection'); missing.value = tab.connectionId; select.append(missing); }
+  select.value = tab?.connectionId || ''; select.disabled = Boolean(tab?.running);
+  $('#console-context').textContent = tab?.source ? tab.source.namespace + ' / ' + tab.source.table : '';
+  $('#console-context').title = $('#console-context').textContent;
+  $('#refresh-metadata').disabled = !selectedConnection()?.connected || Boolean(selectedConnection()?.metadataLoading);
+  updateRunButton();
 }
 async function checkConnection() {
-  $('#retry-connection').disabled = true;
+  const version = ++connectionCheckVersion; $('#retry-connection').disabled = true;
   try {
-    const health = await api('/api/health'); state.configured = Boolean(health.configured);
-    state.databaseType = health.databaseType || 'hive'; state.connectionName = health.connectionName || '';
-    state.catalogName = state.databaseType === 'hive' ? 's3tables' : (health.connectionName || (state.databaseType === 'mysql' ? 'MySQL' : 'PostgreSQL'));
-    $('#catalog-name').textContent = state.catalogName;
-    $('#project-name').textContent = state.catalogName;
-    $('#connection-status').className = 'connection-status' + (state.configured ? ' is-configured' : ' is-error');
-    $('#connection-label').textContent = state.configured ? 'Configured' : 'Not configured';
-    $('#connection-status').title = health.connectionName ? `${health.connectionName} · ${health.target || ''}` : (health.target || 'Database connection');
-    $('#connection-notice').hidden = state.configured;
-    $('#connection-notice').textContent = 'Belum ada koneksi database. Klik ikon pengaturan di kanan atas untuk menambahkan koneksi PostgreSQL, MySQL, atau Spark Thrift / Hive.';
-    $('#server-state').textContent = state.configured ? (health.databaseType || 'Database') + ' · Read / write' : 'Missing connection';
-    if (state.configured) await refreshMetadata();
-    else { state.metadataError = 'Tambahkan koneksi melalui Connection manager.'; state.metadataLoading = false; renderExplorer(); }
+    const data = await api('/api/connections');
+    if (version !== connectionCheckVersion) return;
+    state.serverError = '';
+    const live = new Set(data.connections.map(item => item.id));
+    for (const item of state.connections.values()) if (!live.has(item.id)) {
+      item.connected = false; item.version++; item.metadataLoading = false; item.metadataLoaded = false; item.schemas = []; item.schemaEntries.clear(); item.columns.clear();
+    }
+    for (const profile of data.connections) {
+      const previous = state.connections.get(profile.id);
+      if (previous?.connected) Object.assign(previous, profile);
+      else state.connections.set(profile.id, makeConnection(profile, true));
+    }
+    if (!state.connections.has(state.selectedConnectionId)) state.selectedConnectionId = data.defaultConnectionId || data.connections[0]?.id || state.connections.keys().next().value || null;
+    // Migrate old drafts once. An explicitly associated missing connection is never reassigned.
+    for (const tab of state.tabs) if (!Object.hasOwn(tab,'connectionId') && data.defaultConnectionId) tab.connectionId = data.defaultConnectionId;
+    persistDrafts(); updateConnectionUI(); renderExplorer(); renderTabs();
+    await Promise.all(data.connections.map(item => {
+      const source = state.connections.get(item.id); return source.expanded && !source.metadataLoading ? refreshMetadata(item.id) : null;
+    }));
   } catch (error) {
-    state.configured = false; state.metadataLoading = false; state.metadataError = error.message;
-    $('#connection-status').className = 'connection-status is-error'; $('#connection-label').textContent = 'Offline';
-    $('#connection-notice').hidden = false; $('#connection-notice').textContent = error.message + ' Gunakan tombol Check connection di kanan atas.';
-    $('#server-state').textContent = 'Server offline'; renderExplorer();
-  } finally { $('#retry-connection').disabled = false; updateRunButton(); $('#refresh-metadata').disabled = !state.configured; }
+    if (version !== connectionCheckVersion) return;
+    state.serverError = error.message;
+    for (const item of state.connections.values()) { item.connected = false; item.version++; item.metadataLoading = false; }
+    updateConnectionUI(); renderExplorer();
+  } finally { if (version === connectionCheckVersion) $('#retry-connection').disabled = false; }
 }
 function metadataNote(text, error = false) { return element('p', 'pane-note metadata-note' + (error ? ' is-error' : ''), text); }
 function setSidebar(tool = state.tool, open = true) {
@@ -300,101 +382,123 @@ function setSidebar(tool = state.tool, open = true) {
   $('#sidebar-backdrop').hidden = !open || !mobile;
   $('.workbench').inert = open && mobile;
 }
-async function refreshMetadata() {
-  if (!state.configured) return;
-  const version = ++metadataVersion;
-  state.metadataLoading = true; state.metadataError = ''; state.schemaEntries.clear(); state.columns.clear();
-  $('#refresh-metadata').disabled = true; renderExplorer();
+async function refreshMetadata(id = state.selectedConnectionId) {
+  const source = state.connections.get(id); if (!source?.connected) return;
+  const version = ++source.version;
+  source.metadataLoading = true; source.metadataLoaded = false; source.metadataError = ''; source.schemas = []; source.schemaEntries.clear(); source.columns.clear();
+  updateConnectionUI(); renderExplorer();
   try {
-    const data = await api('/api/databases');
-    if (version !== metadataVersion) return;
-    state.schemas = data.databases.filter(v => typeof v === 'string').sort((a,b) => a.localeCompare(b));
-    $('#connection-label').textContent = 'Connected'; $('#connection-status').className = 'connection-status is-configured';
-  } catch (error) {
-    if (version !== metadataVersion) return;
-    state.metadataError = error.message; $('#connection-label').textContent = 'Unavailable'; $('#connection-status').className = 'connection-status is-error';
-  } finally {
-    if (version === metadataVersion) { state.metadataLoading = false; renderExplorer(); $('#refresh-metadata').disabled = false; }
-  }
+    const data = await api(metadataUrl('/api/databases', id));
+    if (version !== source.version) return;
+    source.schemas = data.databases.filter(v => typeof v === 'string').sort((a,b) => a.localeCompare(b)); source.metadataLoaded = true;
+  } catch (error) { if (version === source.version) source.metadataError = error.message; }
+  finally { if (version === source.version) { source.metadataLoading = false; renderExplorer(); updateConnectionUI(); } }
 }
-async function toggleSchema(namespace) {
-  let entry = state.schemaEntries.get(namespace);
-  if (entry?.tables && !entry.error) { entry.expanded = !entry.expanded; renderExplorer(); return; }
+async function toggleSchema(namespace, id = state.selectedConnectionId) {
+  const source = state.connections.get(id); if (!source?.connected) return;
+  let entry = source.schemaEntries.get(namespace);
+  if (entry?.tables && !entry.error && !entry.loading) { entry.expanded = !entry.expanded; renderExplorer(); return; }
   if (entry?.loading) return;
-  const version = metadataVersion;
-  entry = { expanded: true, loading: true, tables: [], error: '' }; state.schemaEntries.set(namespace, entry); renderExplorer();
+  const version = source.version;
+  entry = {expanded:true,loading:true,tables:[],error:''}; source.schemaEntries.set(namespace, entry); renderExplorer();
   try {
-    const data = await api('/api/tables?namespace=' + encodeURIComponent(namespace));
-    if (version !== metadataVersion) return;
+    const data = await api(metadataUrl('/api/tables', id, {namespace}));
+    if (version !== source.version) return;
     entry.tables = data.tables.filter(v => typeof v === 'string').sort((a,b) => a.localeCompare(b));
-  } catch (error) { entry.error = error.message; }
-  finally { if (version === metadataVersion) { entry.loading = false; renderExplorer(); } }
+  } catch (error) { if (version === source.version) entry.error = error.message; }
+  finally { if (version === source.version) { entry.loading = false; renderExplorer(); } }
 }
 const columnKey = (namespace, table) => JSON.stringify([namespace, table]);
-async function toggleColumns(namespace, table) {
-  const key = columnKey(namespace, table); let entry = state.columns.get(key);
-  if (entry?.items && !entry.error) { entry.expanded = !entry.expanded; renderExplorer(); return; }
+async function toggleColumns(namespace, table, id = state.selectedConnectionId) {
+  const source = state.connections.get(id); if (!source?.connected) return;
+  const key = columnKey(namespace, table); let entry = source.columns.get(key);
+  if (entry?.items && !entry.error && !entry.loading) { entry.expanded = !entry.expanded; renderExplorer(); return; }
   if (entry?.loading) return;
-  const version = metadataVersion;
-  entry = { expanded: true, loading: true, items: [], error: '' }; state.columns.set(key, entry); renderExplorer();
+  const version = source.version;
+  entry = {expanded:true,loading:true,items:[],error:''}; source.columns.set(key, entry); renderExplorer();
   try {
-    const data = await api('/api/columns?namespace=' + encodeURIComponent(namespace) + '&table=' + encodeURIComponent(table));
-    if (version !== metadataVersion) return; entry.items = data.columns;
-  } catch (error) { entry.error = error.message; }
-  finally { if (version === metadataVersion) { entry.loading = false; renderExplorer(); } }
+    const data = await api(metadataUrl('/api/columns', id, {namespace,table}));
+    if (version !== source.version) return; entry.items = data.columns;
+  } catch (error) { if (version === source.version) entry.error = error.message; }
+  finally { if (version === source.version) { entry.loading = false; renderExplorer(); } }
+}
+function selectSource(source) {
+  state.selectedConnectionId = source.id;
+  if (!source.connected) { openConnectionManager(source); return; }
+  source.expanded = !source.expanded; updateConnectionUI(); renderExplorer();
+  if (source.expanded && !source.metadataLoaded && !source.metadataLoading) refreshMetadata(source.id);
+}
+function renderSchemas(source, search) {
+  const list = element('ul','object-list source-objects'), id = source.id;
+  source.schemas.forEach(namespace => {
+    const entry = source.schemaEntries.get(namespace), schemaMatches = namespace.toLowerCase().includes(search);
+    const tables = (entry?.tables || []).filter(name => schemaMatches || name.toLowerCase().includes(search));
+    if (search && !schemaMatches && !tables.length) return;
+    const item = element('li'), row = element('div','object-row schema-row');
+    const expand = button('', 'disclosure', () => toggleSchema(namespace,id)); expand.append(icon('chevron'));
+    expand.setAttribute('aria-label','Toggle tables in ' + source.name + ' / ' + namespace); expand.setAttribute('aria-expanded',String(Boolean(entry?.expanded))); expand.dataset.focus = id + ':schema:' + namespace;
+    const name = button('', 'object-name', () => toggleSchema(namespace,id)); name.append(icon('schema'), element('span','',namespace)); name.title = namespace; name.dataset.focus = id + ':schema-name:' + namespace;
+    row.append(expand,name); item.append(row);
+    if (entry?.expanded) {
+      if (entry.loading) item.append(metadataNote('Loading tables…'));
+      else if (entry.error) item.append(metadataNote(entry.error,true),button('Retry tables','text-button',()=>toggleSchema(namespace,id)));
+      else if (!tables.length) item.append(metadataNote(search ? 'No matching loaded tables.' : 'No tables in this schema.'));
+      else {
+        const children = element('ul','object-list');
+        tables.forEach(table => {
+          const tableItem = element('li'), tableRow = element('div','object-row table-row'), key = columnKey(namespace,table), columns = source.columns.get(key);
+          const disclosure = button('', 'disclosure',()=>toggleColumns(namespace,table,id)); disclosure.append(icon('chevron'));
+          disclosure.setAttribute('aria-expanded',String(Boolean(columns?.expanded))); disclosure.setAttribute('aria-label','Show columns of ' + source.name + ' / ' + table); disclosure.dataset.focus = id + ':columns:' + key;
+          const open = button('', 'object-name',()=>openTable(namespace,table,id)); open.append(icon('table'),element('span','',table)); open.title = 'Open ' + source.name + ' / ' + namespace + '.' + table + ' · LIMIT 50'; open.dataset.focus = id + ':table:' + key;
+          tableRow.append(disclosure,open); tableItem.append(tableRow);
+          if (columns?.expanded) {
+            if (columns.loading) tableItem.append(metadataNote('Loading columns…'));
+            else if (columns.error) tableItem.append(metadataNote(columns.error,true),button('Retry columns','text-button',()=>toggleColumns(namespace,table,id)));
+            else if (!columns.items.length) tableItem.append(metadataNote('No columns reported.'));
+            else columns.items.forEach(column=>{const line=element('div','column-row');line.append(element('span','column-name',column.name),element('span','column-type',column.type));line.title=column.comment||column.name+' · '+column.type;tableItem.append(line);});
+          }
+          children.append(tableItem);
+        }); item.append(children);
+      }
+    }
+    list.append(item);
+  });
+  if (!list.children.length) list.append(metadataNote(search ? 'No matching loaded objects. Expand schemas to load tables.' : 'No schemas found.'));
+  return list;
 }
 function renderExplorer() {
-  const root = $('#schema-list'); root.setAttribute('aria-busy', String(state.metadataLoading));
-  $('#schema-count').textContent = state.metadataLoading ? '' : String(state.schemas.length);
-  restoreFocus(root, () => {
+  const root = $('#schema-list'); root.setAttribute('aria-busy',String([...state.connections.values()].some(item=>item.metadataLoading)));
+  $('#schema-count').textContent = String(state.connections.size);
+  restoreFocus(root,()=>{
     root.replaceChildren();
-    if (state.metadataLoading) { root.append(element('p','pane-note','Loading schemas…')); return; }
-    if (state.metadataError) { root.append(element('p','pane-note is-error',state.metadataError), button('Retry connection','text-button',checkConnection)); return; }
-    const search = $('#object-filter').value.toLowerCase(); const list = element('ul','object-list');
-    state.schemas.forEach(namespace => {
-      const entry = state.schemaEntries.get(namespace);
-      const schemaMatches = namespace.toLowerCase().includes(search);
-      const tables = (entry?.tables || []).filter(name => schemaMatches || name.toLowerCase().includes(search));
-      if (search && !schemaMatches && !tables.length) return;
-      const item = element('li'); const row = element('div','object-row');
-      const expand = button('', 'disclosure', () => toggleSchema(namespace)); expand.append(icon('chevron'));
-      expand.setAttribute('aria-label','Toggle tables in ' + namespace); expand.setAttribute('aria-expanded',String(Boolean(entry?.expanded)));
-      expand.dataset.focus = 'schema:' + namespace;
-      const name = button('', 'object-name', () => toggleSchema(namespace)); name.append(icon('schema'), element('span','',namespace)); name.title = namespace;
-      name.dataset.focus = 'schema-name:' + namespace;
-      row.append(expand, name); item.append(row);
-      if (entry?.expanded) {
-        if (entry.loading) item.append(metadataNote('Loading tables…'));
-        else if (entry.error) { item.append(metadataNote(entry.error,true), button('Retry tables','text-button',() => toggleSchema(namespace))); }
-        else if (!tables.length) item.append(metadataNote(search ? 'No matching loaded tables.' : 'No tables in this schema.'));
-        else {
-          const children = element('ul','object-list');
-          tables.forEach(table => {
-            const tableItem = element('li'), tableRow = element('div','object-row table-row'), key = columnKey(namespace,table), columns = state.columns.get(key);
-            const disclosure = button('', 'disclosure', () => toggleColumns(namespace,table)); disclosure.append(icon('chevron'));
-            disclosure.setAttribute('aria-expanded',String(Boolean(columns?.expanded))); disclosure.setAttribute('aria-label','Show columns of ' + table); disclosure.dataset.focus = 'columns:' + key;
-            const open = button('', 'object-name', () => openTable(namespace,table)); open.append(icon('table'), element('span','',table)); open.title = 'Open ' + namespace + '.' + table + ' · LIMIT 50'; open.dataset.focus = 'table:' + key;
-            tableRow.append(disclosure,open); tableItem.append(tableRow);
-            if(columns?.expanded) {
-              if(columns.loading)tableItem.append(metadataNote('Loading columns…'));
-              else if(columns.error)tableItem.append(metadataNote(columns.error,true),button('Retry columns','text-button',()=>toggleColumns(namespace,table)));
-              else if(!columns.items.length)tableItem.append(metadataNote('No columns reported.'));
-              else columns.items.forEach(column=>{const line=element('div','column-row');line.append(element('span','column-name',column.name),element('span','column-type',column.type));line.title=column.comment||column.name+' · '+column.type;tableItem.append(line);});
-            }
-            children.append(tableItem);
-          }); item.append(children);
-        }
+    if (state.serverError) root.append(metadataNote(state.serverError,true),button('Retry server','text-button',checkConnection));
+    if (!state.connections.size) { root.append(element('p','pane-note','No data sources yet. Add a connection to browse databases and open SQL consoles.')); return; }
+    const search = $('#object-filter').value.toLowerCase();
+    for (const source of state.connections.values()) {
+      const section = element('section','data-source'), row = element('div','object-row source-row' + (source.id===state.selectedConnectionId?' is-selected':''));
+      section.setAttribute('aria-label',source.name + ' · ' + typeLabel(source.type));
+      const expand = button('','disclosure',()=>selectSource(source)); expand.append(icon('chevron')); expand.setAttribute('aria-expanded',String(source.expanded)); expand.setAttribute('aria-label','Expand ' + source.name); expand.dataset.focus = 'source-expand:' + source.id;
+      const name = button('','object-name source-name',()=>selectSource(source)); name.append(icon('database'),element('span','',source.name)); name.title=source.name+' · '+typeLabel(source.type)+(source.connected?'':' · Reconnect'); name.dataset.focus='source:'+source.id;
+      const consoleButton=button('','icon-button',()=>{state.selectedConnectionId=source.id;addConsole('',undefined,undefined,source.id);});consoleButton.append(icon('code'));consoleButton.title='New SQL console for '+source.name;consoleButton.setAttribute('aria-label',consoleButton.title);consoleButton.disabled=!source.connected;consoleButton.dataset.focus='source-console:'+source.id;
+      const settings=button('','icon-button',()=>openConnectionManager(source));settings.append(icon('settings'));settings.title='Edit '+source.name;settings.setAttribute('aria-label',settings.title);settings.dataset.focus='source-edit:'+source.id;
+      row.append(expand,name,consoleButton,settings); section.append(row);
+      section.append(element('p','source-caption',typeLabel(source.type)+' · '+(source.connected?'Configured':'Disconnected · reconnect')));
+      if (source.expanded && source.connected) {
+        if (source.metadataLoading) section.append(metadataNote('Loading schemas…'));
+        else if (source.metadataError) section.append(metadataNote(source.metadataError,true),button('Retry schemas','text-button',()=>refreshMetadata(source.id)));
+        else section.append(renderSchemas(source,source.name.toLowerCase().includes(search)?'':search));
       }
-      list.append(item);
-    });
-    root.append(list);
-    if (!list.children.length) root.append(element('p','pane-note',search ? 'No matching loaded objects. Expand schemas to load their tables.' : 'No schemas found in this database.'));
+      root.append(section);
+    }
   });
 }
-function openTable(namespace, table) {
-  const existing = state.tabs.find(tab => tab.source?.namespace === namespace && tab.source?.table === table);
+function openTable(namespace, table, id = state.selectedConnectionId) {
+  const source = state.connections.get(id); if (!source?.connected) return;
+  state.selectedConnectionId = id;
+  const existing = state.tabs.find(tab=>tab.connectionId===id && tab.source?.namespace===namespace && tab.source?.table===table);
   if (existing) { switchTab(existing.id); editor.focus(); }
-  else { const sql = state.databaseType === 'hive' ? C.tableSql(namespace, table) : C.tableSql(namespace, table, state.databaseType); const tab = addConsole(sql, table, {namespace,table}); if(tab)runQuery(tab.sql); }
+  else { const tab=addConsole(C.tableSql(namespace,table,source.type),table,{namespace,table},id); if(tab)runQuery(tab.sql); }
+  renderExplorer();
   if (window.matchMedia('(max-width: 700px)').matches) setSidebar(state.tool,false);
 }
 function renderHistory() {
@@ -403,8 +507,8 @@ function renderHistory() {
   const root = $('#history-list'); root.replaceChildren();
   if (!state.history.length) { root.append(element('p','pane-note','Executed queries appear here. Select one to open its SQL in a new console.')); return; }
   state.history.forEach(item => {
-    const entry = button('', 'history-item', () => addConsole(item.sql));
-    entry.append(element('code','',item.sql), element('span','history-meta',new Date(item.ranAt).toLocaleTimeString('id-ID',{hour:'2-digit',minute:'2-digit'})+' · '+item.rows+' rows'));
+    const entry = button('', 'history-item', () => addConsole(item.sql, undefined, undefined, item.connectionId || state.selectedConnectionId));
+    entry.append(element('code','',item.sql), element('span','history-meta',new Date(item.ranAt).toLocaleTimeString('id-ID',{hour:'2-digit',minute:'2-digit'})+' · '+(state.connections.get(item.connectionId)?.name || 'Database')+' · '+item.rows+' rows'));
     root.append(entry);
   });
 }
@@ -472,25 +576,26 @@ function openRowDetail(row,columns,index) {
 }
 async function runQuery(explicitSql) {
   const tab = active();
-  if(tab.running || !state.configured)return;
+  if(tab.running || !tabConnection()?.connected)return;
+  const connectionId = tab.connectionId;
   rememberEditor();
   const sql = typeof explicitSql === 'string' ? explicitSql : C.executionSql(editor.value,editor.selectionStart,editor.selectionEnd);
   if(!sql.trim()) { setToast('Write a SQL statement before executing.'); editor.focus(); return; }
   tab.running=true; tab.error=''; tab.result=null; tab.output='Executing…\n\n'+sql; tab.dock='results'; tab.page=1; tab.filter=''; tab.sort=null;
   renderTabs(); renderResults(); updateRunButton();
   try {
-    const result = await api('/api/query',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sql})});
+    const result = await api('/api/query',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sql,connectionId})});
     if(!Array.isArray(result.columns) || !Array.isArray(result.rows)) throw new Error('Format hasil query tidak valid.');
     tab.result=result;
     const affected = Number.isInteger(result.updateCount) && result.updateCount >= 0;
     const summary = result.columns.length ? `${result.rows.length} rows returned${result.truncated ? ' (server row cap reached)' : ''}.` : affected ? `${result.updateCount} rows affected.` : 'Statement completed. Affected-row count unavailable.';
     tab.output = `${new Date().toLocaleTimeString('id-ID')} · ${result.durationMs} ms\n${summary}\n\n${sql}`;
-    state.history.unshift({sql,rows:result.rows.length,ranAt:Date.now()}); state.history=state.history.slice(0,MAX_HISTORY_ITEMS);saveHistory();renderHistory();
+    state.history.unshift({sql,connectionId,rows:result.rows.length,ranAt:Date.now()}); state.history=state.history.slice(0,MAX_HISTORY_ITEMS);saveHistory();renderHistory();
     setToast(tab.name + ' · ' + summary);
   } catch(error) { tab.error=error.message;tab.output='Execution failed\n'+error.message+'\n\n'+sql;setToast(tab.name+' · Query failed'); }
   finally {
     tab.running=false;renderTabs();
-    if(state.activeId===tab.id){renderResults();updateRunButton();}
+    if(state.activeId===tab.id){renderResults();updateConnectionUI();}
   }
 }
 function exportResult(format) {
@@ -517,9 +622,10 @@ function indentEditor(outdent) {
 function showCompletion() {
   const before=editor.value.slice(0,editor.selectionStart),qualifiedPrefix=before.match(/[\w$.]*$/)[0],prefix=qualifiedPrefix.split('.').at(-1);
   const options=new Map(qualifiedPrefix.includes('.')?[]:[...C.KEYWORDS].map(word=>[word,{label:word,value:word,qualified:false}]));
-  for(const namespace of state.schemas)options.set(namespace,{label:namespace,value:C.quoteIdentifier(namespace,state.databaseType),qualified:false});
-  for(const [namespace,entry] of state.schemaEntries)for(const table of entry.tables || [])options.set(namespace+'.'+table,{label:namespace+'.'+table,value:C.qualifiedTable(namespace,table,state.databaseType),qualified:true});
-  for(const entry of state.columns.values())for(const column of entry.items || [])options.set(column.name,{label:column.name,value:C.quoteIdentifier(column.name,state.databaseType),qualified:false});
+  const source=tabConnection(), databaseType=source?.type || 'hive';
+  for(const namespace of source?.schemas || [])options.set(namespace,{label:namespace,value:C.quoteIdentifier(namespace,databaseType),qualified:false});
+  for(const [namespace,entry] of source?.schemaEntries || [])for(const table of entry.tables || [])options.set(namespace+'.'+table,{label:namespace+'.'+table,value:C.qualifiedTable(namespace,table,databaseType),qualified:true});
+  for(const entry of source?.columns.values() || [])for(const column of entry.items || [])options.set(column.name,{label:column.name,value:C.quoteIdentifier(column.name,databaseType),qualified:false});
   const list=[...options.values()].filter(item=>item.label.toLowerCase().split('.').some(part=>part.startsWith(prefix.toLowerCase()))).slice(0,80);
   if(!list.length){setToast('No matching SQL or loaded objects.');return;}
   completionRange={start:editor.selectionStart-prefix.length,qualifiedStart:editor.selectionStart-qualifiedPrefix.length,end:editor.selectionEnd};
@@ -575,13 +681,26 @@ for(const tool of ['database','history'])$('#'+tool+'-tool').addEventListener('c
 $('#hide-sidebar').addEventListener('click',()=>{setSidebar(state.tool,false);$('#'+state.tool+'-tool').focus();});
 $('#sidebar-backdrop').addEventListener('click',()=>{setSidebar(state.tool,false);$('#'+state.tool+'-tool').focus();});
 $('#object-filter').addEventListener('input',renderExplorer);
-$('#refresh-metadata').addEventListener('click',refreshMetadata);
+$('#refresh-metadata').addEventListener('click',()=>refreshMetadata());
 $('#retry-connection').addEventListener('click',checkConnection);
-$('#manage-connections').addEventListener('click',openConnectionManager);
-$('#close-connection').addEventListener('click',()=>$('#connection-dialog').close());
-$('#cancel-connection').addEventListener('click',()=>$('#connection-dialog').close());
+$('#manage-connections').addEventListener('click',()=>openConnectionManager());
+$('#add-connection').addEventListener('click',()=>openConnectionManager());
+$('#disconnect-connection').addEventListener('click',()=>disconnectConnection(state.editingConnectionId));
+$('#console-connection').addEventListener('change',()=>{
+  const tab=active(); if(tab.running)return;
+  tab.connectionId=$('#console-connection').value; delete tab.source; tab.result=null; tab.error=''; tab.output='';
+  if(tab.connectionId)state.selectedConnectionId=tab.connectionId;
+  persistDrafts(); updateConnectionUI(); renderTabs(); renderResults(); renderExplorer();
+});
+$('#close-connection').addEventListener('click',closeConnectionManager);
+$('#connection-dialog').addEventListener('cancel',()=>{$('#connection-password').value='';$('#connection-jdbc-url').value='';});
+$('#cancel-connection').addEventListener('click',closeConnectionManager);
 $('#new-connection').addEventListener('click',resetConnectionForm);
-$('#database-type').addEventListener('change',updateConnectionType);
+$('#database-type').addEventListener('change',()=>{
+  if (['5432','3306','10000'].includes($('#connection-port').value)) $('#connection-port').value='';
+  if (['postgres','mysql','default'].includes($('#connection-database').value)) $('#connection-database').value='';
+  updateConnectionType();
+});
 $('#test-connection').addEventListener('click',()=>requestConnection('/api/connections/test'));
 $('#connection-form').addEventListener('submit',event=>{event.preventDefault();requestConnection('/api/connections/connect');});
 $('#clear-history').addEventListener('click',()=>{state.history=[];saveHistory();renderHistory();});
@@ -598,4 +717,4 @@ window.addEventListener('beforeunload',()=>{rememberEditor();persistDrafts();});
 document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='hidden'){rememberEditor();persistDrafts();}});
 document.addEventListener('keydown',event=>{if(event.key==='Escape'&&state.sidebarOpen&&window.matchMedia('(max-width: 700px)').matches){setSidebar(state.tool,false);$('#'+state.tool+'-tool').focus();}});
 window.matchMedia('(max-width: 700px)').addEventListener('change',event=>{if(event.matches)setSidebar(state.tool,false);else setSidebar(state.tool,state.sidebarOpen);});
-editor.value=active().sql;switchTab(state.activeId);renderHistory();setSidebar();updateConnectionType();checkConnection();
+editor.value=active().sql;switchTab(state.activeId);renderHistory();setSidebar();updateConnectionType();saveConnections();checkConnection();

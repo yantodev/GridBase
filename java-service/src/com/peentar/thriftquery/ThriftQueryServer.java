@@ -26,21 +26,24 @@ public final class ThriftQueryServer {
     private static final int MAX_SQL_LENGTH = 20_000;
 
     private final AppConfig config;
-    private final JdbcService jdbc;
+    private final ConnectionRegistry connections;
     private final ExecutorService executor = Executors.newFixedThreadPool(8);
     private HttpServer server;
 
     private ThriftQueryServer(AppConfig config) {
+        this(config, new ConnectionRegistry(config));
+    }
+
+    ThriftQueryServer(AppConfig config, ConnectionRegistry connections) {
         this.config = config;
-        this.jdbc = new JdbcService(config);
+        this.connections = connections;
     }
 
     public static void main(String[] args) throws Exception {
         Path projectRoot = Path.of(".").toAbsolutePath().normalize();
         AppConfig config = AppConfig.load(projectRoot);
         if (args.length > 0 && "--check".equals(args[0])) {
-            System.out.println("Java service configuration: " + (config.configured() ? "ready" : "incomplete"));
-            System.out.println("JDBC target: " + config.redactedTarget());
+            System.out.println("Java service configuration: ready (connections added through UI)");
             System.out.println("Static directory: " + config.publicDir);
             return;
         }
@@ -51,9 +54,12 @@ public final class ThriftQueryServer {
         Runtime.getRuntime().addShutdownHook(new Thread(application::stop));
     }
 
-    private void start() throws IOException {
-        server = HttpServer.create(new InetSocketAddress(config.host, config.port), 0);
+    private void start() throws IOException { start(config.port); }
+
+    void start(int port) throws IOException {
+        server = HttpServer.create(new InetSocketAddress(config.host, port), 0);
         server.createContext("/api/health", this::health);
+        server.createContext("/api/connections", this::listConnections);
         server.createContext("/api/connections/test", this::testConnection);
         server.createContext("/api/connections/connect", this::connect);
         server.createContext("/api/connections/disconnect", this::disconnect);
@@ -65,11 +71,13 @@ public final class ThriftQueryServer {
         server.createContext("/", this::staticFiles);
         server.setExecutor(executor);
         server.start();
-        System.out.println("GridBase (Java JDBC) running at http://" + config.host + ":" + config.port);
-        System.out.println("JDBC driver: " + (jdbc.profile() == null ? "not configured" : jdbc.profile().type().driverClass()));
+        System.out.println("GridBase (Java JDBC) running at http://" + config.host + ":" + port());
+        System.out.println("Configured database connections: " + connections.entries().size());
     }
 
-    private void stop() {
+    int port() { return server.getAddress().getPort(); }
+
+    void stop() {
         if (server != null) server.stop(0);
         executor.shutdownNow();
     }
@@ -83,21 +91,24 @@ public final class ThriftQueryServer {
     }
 
     private String healthPayload() {
-        ConnectionProfile profile = jdbc.profile();
-        String status = profile == null ? "degraded" : "ok";
-        return "{\"status\":" + JsonUtil.quote(status)
-                + ",\"configured\":" + (profile != null)
-                + ",\"readOnly\":false"
-                + ",\"databaseType\":" + JsonUtil.quote(profile == null ? null : profile.type().id())
-                + ",\"connectionName\":" + JsonUtil.quote(profile == null ? null : profile.name())
-                + ",\"target\":" + JsonUtil.quote(profile == null ? config.redactedTarget() : profile.redactedUrl()) + "}";
+        synchronized (connections) {
+            ConnectionRegistry.Entry entry = connections.defaultEntry();
+            ConnectionProfile profile = entry == null ? null : entry.service().profile();
+            boolean configured = !connections.entries().isEmpty();
+            return "{\"status\":" + JsonUtil.quote(configured ? "ok" : "degraded")
+                    + ",\"configured\":" + configured
+                    + ",\"readOnly\":false"
+                    + ",\"databaseType\":" + JsonUtil.quote(profile == null ? null : profile.type().id())
+                    + ",\"connectionName\":" + JsonUtil.quote(profile == null ? null : profile.name())
+                    + ",\"target\":" + JsonUtil.quote(profile == null ? null : profile.redactedUrl()) + "}";
+        }
     }
 
     private void testConnection(HttpExchange exchange) throws IOException {
         if (!"POST".equals(exchange.getRequestMethod())) { methodNotAllowed(exchange); return; }
         try {
             ConnectionProfile candidate = ConnectionProfile.fromJson(readBody(exchange));
-            jdbc.testConnection(candidate);
+            connections.test(candidate);
             sendJson(exchange, 200, "{\"ok\":true,\"connection\":" + candidate.safeJson() + "}");
         } catch (IllegalArgumentException error) {
             sendJson(exchange, 400, error(error.getMessage()));
@@ -115,9 +126,10 @@ public final class ThriftQueryServer {
     private void connect(HttpExchange exchange) throws IOException {
         if (!"POST".equals(exchange.getRequestMethod())) { methodNotAllowed(exchange); return; }
         try {
-            ConnectionProfile candidate = ConnectionProfile.fromJson(readBody(exchange));
-            jdbc.connect(candidate);
-            sendJson(exchange, 200, "{\"ok\":true,\"connection\":" + candidate.safeJson() + "}");
+            String body = readBody(exchange);
+            ConnectionProfile candidate = ConnectionProfile.fromJson(body);
+            ConnectionRegistry.Entry entry = connections.connect(JsonUtil.stringFieldOrDefault(body, "connectionId", ""), candidate);
+            sendJson(exchange, 200, "{\"ok\":true,\"connection\":" + entry.toJson() + "}");
         } catch (IllegalArgumentException error) {
             sendJson(exchange, 400, error(error.getMessage()));
         } catch (ClassNotFoundException error) {
@@ -133,8 +145,24 @@ public final class ThriftQueryServer {
 
     private void disconnect(HttpExchange exchange) throws IOException {
         if (!"POST".equals(exchange.getRequestMethod())) { methodNotAllowed(exchange); return; }
-        jdbc.disconnect();
-        sendJson(exchange, 200, "{\"ok\":true}");
+        try {
+            connections.disconnect(JsonUtil.stringField(readBody(exchange), "connectionId"));
+            sendJson(exchange, 200, "{\"ok\":true}");
+        } catch (ConnectionRegistry.UnknownConnectionException error) {
+            sendJson(exchange, 404, error(error.getMessage()));
+        } catch (IllegalArgumentException error) {
+            sendJson(exchange, 400, error("ID koneksi wajib diisi."));
+        } finally { exchange.close(); }
+    }
+
+    private void listConnections(HttpExchange exchange) throws IOException {
+        if (!"GET".equals(exchange.getRequestMethod())) { methodNotAllowed(exchange); return; }
+        String payload;
+        synchronized (connections) {
+            payload = "{\"defaultConnectionId\":" + JsonUtil.quote(connections.defaultId())
+                    + ",\"connections\":[" + connections.entries().stream().map(ConnectionRegistry.Entry::toJson).collect(Collectors.joining(",")) + "]}";
+        }
+        sendJson(exchange, 200, payload);
         exchange.close();
     }
 
@@ -144,15 +172,18 @@ public final class ThriftQueryServer {
             return;
         }
         try {
-            String sql = JsonUtil.stringField(readBody(exchange), "sql");
+            String body = readBody(exchange);
+            String sql = JsonUtil.stringField(body, "sql");
             SqlPolicy.Result validation = SqlPolicy.validate(sql, MAX_SQL_LENGTH);
             if (!validation.ok()) {
                 sendJson(exchange, 422, error(validation.error()));
                 return;
             }
-            sendJson(exchange, 200, jdbc.query(validation.sql()).toJson());
+            sendJson(exchange, 200, connections.require(JsonUtil.stringFieldOrDefault(body, "connectionId", "")).query(validation.sql()).toJson());
         } catch (IllegalArgumentException error) {
             sendJson(exchange, 400, error("Request tidak valid."));
+        } catch (ConnectionRegistry.UnknownConnectionException error) {
+            sendJson(exchange, 404, error(error.getMessage()));
         } catch (IllegalStateException error) {
             sendJson(exchange, 503, error("Koneksi database belum dikonfigurasi di server."));
         } catch (SQLTimeoutException error) {
@@ -184,8 +215,12 @@ public final class ThriftQueryServer {
             return;
         }
         try {
-            List<String> databases = jdbc.databases();
+            List<String> databases = connections.require(queryParams(exchange).get("connectionId")).databases();
             sendJson(exchange, 200, "{\"" + responseField + "\":" + JsonUtil.stringArray(databases) + "}");
+        } catch (IllegalArgumentException error) {
+            sendJson(exchange, 400, error("Parameter koneksi tidak valid."));
+        } catch (ConnectionRegistry.UnknownConnectionException error) {
+            sendJson(exchange, 404, error(error.getMessage()));
         } catch (IllegalStateException error) {
             sendJson(exchange, 503, error("Koneksi database belum dikonfigurasi di server."));
         } catch (SQLTimeoutException error) {
@@ -202,13 +237,8 @@ public final class ThriftQueryServer {
     private void metadata(HttpExchange exchange, boolean columns) throws IOException {
         if (!"GET".equals(exchange.getRequestMethod())) { methodNotAllowed(exchange); return; }
         try {
-            Map<String, String> params = new HashMap<>();
-            String raw = exchange.getRequestURI().getRawQuery();
-            if (raw != null) for (String pair : raw.split("&")) {
-                String[] parts = pair.split("=", 2);
-                params.put(URLDecoder.decode(parts[0], StandardCharsets.UTF_8),
-                        parts.length == 2 ? URLDecoder.decode(parts[1], StandardCharsets.UTF_8) : "");
-            }
+            Map<String, String> params = queryParams(exchange);
+            JdbcService jdbc = connections.require(params.get("connectionId"));
             String namespace = params.get("namespace");
             String payload = columns
                     ? "{\"columns\":[" + jdbc.columns(namespace, params.get("table")).stream().map(JdbcService.Column::toJson).collect(Collectors.joining(",")) + "]}"
@@ -216,6 +246,8 @@ public final class ThriftQueryServer {
             sendJson(exchange, 200, payload);
         } catch (IllegalArgumentException error) {
             sendJson(exchange, 422, error("Identifier wajib diisi, maksimal 256 karakter, tanpa karakter kontrol."));
+        } catch (ConnectionRegistry.UnknownConnectionException error) {
+            sendJson(exchange, 404, error(error.getMessage()));
         } catch (IllegalStateException error) {
             sendJson(exchange, 503, error("Koneksi database belum dikonfigurasi di server."));
         } catch (SQLTimeoutException error) {
@@ -230,6 +262,17 @@ public final class ThriftQueryServer {
         } finally {
             exchange.close();
         }
+    }
+
+    private static Map<String, String> queryParams(HttpExchange exchange) {
+        Map<String, String> params = new HashMap<>();
+        String raw = exchange.getRequestURI().getRawQuery();
+        if (raw != null) for (String pair : raw.split("&")) {
+            String[] parts = pair.split("=", 2);
+            params.put(URLDecoder.decode(parts[0], StandardCharsets.UTF_8),
+                    parts.length == 2 ? URLDecoder.decode(parts[1], StandardCharsets.UTF_8) : "");
+        }
+        return params;
     }
 
     private void staticFiles(HttpExchange exchange) throws IOException {

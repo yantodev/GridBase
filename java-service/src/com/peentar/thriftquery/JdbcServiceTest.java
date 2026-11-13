@@ -37,9 +37,7 @@ public final class JdbcServiceTest {
     private static void checkExecution() throws Exception {
         Path root = Files.createTempDirectory("thrift-write-test");
         try {
-            AppConfig config = AppConfig.load(root, Map.of(
-                    "THRIFT_JDBC_URL", "jdbc:hive2://fixture.example/default",
-                    "THRIFT_USERNAME", "fixture", "THRIFT_PASSWORD", "fixture"));
+            AppConfig config = AppConfig.load(root, Map.of());
             AtomicInteger affectedRows = new AtomicInteger();
             AtomicBoolean writable = new AtomicBoolean();
             String[] executed = {null};
@@ -60,7 +58,7 @@ public final class JdbcServiceTest {
                 case "close" -> null;
                 default -> throw new UnsupportedOperationException(method.getName());
             });
-            JdbcService service = new JdbcService(config, () -> connection);
+            JdbcService service = new JdbcService(config, new ConnectionProfile(DatabaseType.HIVE, "Fixture", "jdbc:hive2://fixture.example/default", "fixture", "fixture"), () -> connection);
             String[] writes = {"CREATE TABLE fixture (id INT)", "INSERT INTO fixture VALUES (1)",
                     "UPDATE fixture SET id = 2", "DELETE FROM fixture", "DROP TABLE fixture"};
             int[] counts = {-1, 25, 0, 2, -1};

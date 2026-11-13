@@ -16,41 +16,27 @@ public final class JdbcService {
     static final int METADATA_LIMIT = 10_000;
     private final AppConfig config;
     private final ConnectionFactory connections;
-    private volatile ConnectionProfile profile;
+    private final ConnectionProfile profile;
 
-    public JdbcService(AppConfig config) {
-        this(config, null);
+    public JdbcService(AppConfig config, ConnectionProfile profile) {
+        this(config, profile, null);
     }
 
-    JdbcService(AppConfig config, ConnectionFactory connections) {
+    JdbcService(AppConfig config, ConnectionProfile profile, ConnectionFactory connections) {
         this.config = config;
-        this.profile = config.connectionProfile();
+        this.profile = profile;
         this.connections = connections != null ? connections : () -> {
-            ConnectionProfile active = profile;
-            if (active == null) throw new IllegalStateException("Database connection is not configured");
-            return active.open();
+            if (profile == null) throw new IllegalStateException("Database connection is not configured");
+            return profile.open();
         };
     }
 
-    public boolean configured() {
-        return profile != null;
-    }
+    public boolean configured() { return profile != null; }
 
-    public ConnectionProfile profile() {
-        return profile;
-    }
+    public ConnectionProfile profile() { return profile; }
 
-    public void connect(ConnectionProfile candidate) throws SQLException, ClassNotFoundException {
-        testConnection(candidate);
-        profile = candidate;
-    }
-
-    public void disconnect() {
-        profile = null;
-    }
-
-    public void testConnection(ConnectionProfile candidate) throws SQLException, ClassNotFoundException {
-        try (Connection connection = candidate.open()) {
+    public void testConnection() throws SQLException, ClassNotFoundException {
+        try (Connection connection = connections.open()) {
             if (!connection.isValid(Math.max(1, config.timeoutSeconds))) {
                 throw new SQLException("Database menolak koneksi.");
             }

@@ -1,8 +1,8 @@
 openapi: 3.0.3
 info:
   title: GridBase API
-  version: 0.2.0
-  description: Local API for querying and changing data through Java JDBC. Connections can be loaded from .env or switched at runtime through the connection manager. Supported databases are Spark Thrift/Hive, PostgreSQL, and MySQL.
+  version: 0.3.0
+  description: Local API for querying and changing data through Java JDBC. Multiple connections coexist in server memory with stable IDs. Startup has no configured database connection; .env contains only server settings. Requests without an ID use the first connection added at runtime; an unknown explicit ID never falls back. Disconnecting the default clears the implicit target until another connect, without redirecting to other existing connections. Supported databases are Spark Thrift/Hive, PostgreSQL, and MySQL.
 servers:
   - url: http://localhost:4173
 paths:
@@ -16,6 +16,22 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HealthResponse'
+  /api/connections:
+    get:
+      summary: List all configured connections without credentials
+      responses:
+        '200':
+          description: Configured connections and legacy default ID
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [connections, defaultConnectionId]
+                properties:
+                  defaultConnectionId: { type: string, nullable: true }
+                  connections:
+                    type: array
+                    items: { $ref: '#/components/schemas/Connection' }
   /api/connections/test:
     post:
       summary: Test a JDBC connection without activating it
@@ -32,7 +48,7 @@ paths:
         '503': { description: JDBC driver unavailable }
   /api/connections/connect:
     post:
-      summary: Test and activate a JDBC connection in server memory
+      summary: Test and add or reconnect one JDBC connection in server memory
       requestBody:
         required: true
         content:
@@ -40,18 +56,36 @@ paths:
             schema:
               $ref: '#/components/schemas/ConnectionRequest'
       responses:
-        '200': { description: Connection activated }
+        '200':
+          description: Connection registered; other connections remain available
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok: { type: boolean }
+                  connection: { $ref: '#/components/schemas/Connection' }
         '400': { description: Invalid connection details }
         '502': { description: Database rejected the connection }
         '503': { description: JDBC driver unavailable }
   /api/connections/disconnect:
     post:
-      summary: Remove the active connection
+      summary: Remove only the specified connection from server memory
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [connectionId]
+              properties:
+                connectionId: { type: string }
       responses:
         '200': { description: Disconnected }
+        '404': { description: Unknown connection ID }
   /api/query:
     post:
-      summary: Execute a SQL statement through the active Java JDBC connection
+      summary: Execute a SQL statement through the selected Java JDBC connection
       description: Accepts one SELECT, WITH, SHOW, DESCRIBE, EXPLAIN, CREATE, INSERT, UPDATE, DELETE, MERGE, ALTER, DROP, or TRUNCATE statement. Successful statements without a result set return empty columns and rows, with updateCount when the driver reports an affected-row count.
       requestBody:
         required: true
@@ -60,6 +94,7 @@ paths:
             schema:
               $ref: '#/components/schemas/QueryRequest'
       responses:
+        '404': { description: Unknown connection ID; no fallback to another connection }
         '200':
           description: Query result
           content:
@@ -78,9 +113,12 @@ paths:
           description: Query timed out
   /api/databases:
     get:
-      summary: List databases or schemas available to the active connection
+      summary: List databases or schemas available to the selected connection
+      parameters:
+        - $ref: '#/components/parameters/ConnectionId'
       description: Uses Spark metadata SQL for Hive and DatabaseMetaData for PostgreSQL/MySQL.
       responses:
+        '404': { description: Unknown connection ID; no fallback to another connection }
         '200':
           description: Available databases
           content:
@@ -98,8 +136,10 @@ paths:
       summary: List tables in a database or schema
       description: Metadata uses a separate 10000-row ceiling, independent of DEFAULT_QUERY_LIMIT.
       parameters:
+        - $ref: '#/components/parameters/ConnectionId'
         - $ref: '#/components/parameters/Namespace'
       responses:
+        '404': { description: Unknown connection ID; no fallback to another connection }
         '200':
           description: Available tables
           content:
@@ -117,14 +157,16 @@ paths:
         '504': { description: Lookup timed out }
   /api/columns:
     get:
-      summary: Describe typed columns of an s3tables table
+      summary: Describe typed columns of a table in the selected connection
       parameters:
+        - $ref: '#/components/parameters/ConnectionId'
         - $ref: '#/components/parameters/Namespace'
         - in: query
           name: table
           required: true
           schema: { type: string, minLength: 1, maxLength: 256 }
       responses:
+        '404': { description: Unknown connection ID; no fallback to another connection }
         '200':
           description: Unique columns without partition separator rows
           content:
@@ -150,8 +192,11 @@ paths:
     get:
       deprecated: true
       summary: Deprecated alias for listing databases
+      parameters:
+        - $ref: '#/components/parameters/ConnectionId'
       description: Compatibility endpoint. Use /api/databases for new clients.
       responses:
+        '404': { description: Unknown connection ID; no fallback to another connection }
         '200':
           description: Available databases in the legacy namespaces field
           content:
@@ -166,6 +211,11 @@ paths:
           description: Database lookup timed out
 components:
   parameters:
+    ConnectionId:
+      in: query
+      name: connectionId
+      description: Stable ID from /api/connections. Unknown IDs return 404 with no fallback.
+      schema: { type: string, maxLength: 100, pattern: '^[a-zA-Z0-9_-]+$' }
     Namespace:
       in: query
       name: namespace
@@ -173,10 +223,20 @@ components:
       description: Nonblank identifier without control characters. Backticks are escaped by the server.
       schema: { type: string, minLength: 1, maxLength: 256 }
   schemas:
+    Connection:
+      type: object
+      required: [id, type, name, target]
+      properties:
+        id: { type: string }
+        type: { type: string, enum: [hive, postgresql, mysql] }
+        name: { type: string }
+        label: { type: string }
+        target: { type: string, description: Redacted JDBC target without credentials }
     QueryRequest:
       type: object
       required: [sql]
       properties:
+        connectionId: { type: string, description: Stable connection ID. Unknown IDs return 404. }
         sql:
           type: string
           maxLength: 20000
@@ -220,6 +280,7 @@ components:
       type: object
       required: [type, username, password]
       properties:
+        connectionId: { type: string, maxLength: 100, pattern: '^[a-zA-Z0-9_-]+$', description: Omit for a new ID; supply to reconnect the same connection. }
         type: { type: string, enum: [hive, postgresql, mysql] }
         name: { type: string, maxLength: 80 }
         host: { type: string, maxLength: 256 }
