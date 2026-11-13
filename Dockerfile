@@ -6,10 +6,12 @@ FROM eclipse-temurin:17-jre-jammy AS jdbc-drivers
 
 ARG POSTGRESQL_JDBC_VERSION=42.7.5
 ARG MYSQL_JDBC_VERSION=9.0.0
+COPY ensure-sqlite-driver.sh /tmp/ensure-sqlite-driver.sh
 
 RUN apt-get update \
     && apt-get install --no-install-recommends --yes ca-certificates curl \
     && mkdir -p /out \
+    && bash /tmp/ensure-sqlite-driver.sh /out > /dev/null \
     && curl --fail --silent --show-error --location "https://repo1.maven.org/maven2/org/postgresql/postgresql/${POSTGRESQL_JDBC_VERSION}/postgresql-${POSTGRESQL_JDBC_VERSION}.jar" --output /out/postgresql.jar \
     && curl --fail --silent --show-error --location "https://repo1.maven.org/maven2/com/mysql/mysql-connector-j/${MYSQL_JDBC_VERSION}/mysql-connector-j-${MYSQL_JDBC_VERSION}.jar" --output /out/mysql-connector-j.jar \
     && rm -rf /var/lib/apt/lists/*
@@ -42,7 +44,7 @@ RUN apt-get update \
     && rm -rf /var/lib/apt/lists/* \
     && groupadd --system --gid 10001 thriftquery \
     && useradd --system --uid 10001 --gid thriftquery --create-home --home-dir /app thriftquery \
-    && mkdir -p /app/build/java /opt/spark/work-dir \
+    && mkdir -p /app/build/java /app/data /opt/spark/work-dir \
     && chown -R thriftquery:thriftquery /app
 
 WORKDIR /app
@@ -57,6 +59,7 @@ RUN chown -R thriftquery:thriftquery /opt/spark/work-dir
 USER thriftquery
 
 EXPOSE 4173
+VOLUME ["/app/data"]
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
     CMD curl --fail --silent http://127.0.0.1:4173/api/health > /dev/null || exit 1

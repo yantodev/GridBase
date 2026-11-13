@@ -7,13 +7,8 @@ public final class JsonUtil {
     }
 
     public static String stringField(String json, String field) {
-        String key = "\"" + field + "\"";
-        int keyIndex = json.indexOf(key);
-        if (keyIndex < 0) throw new IllegalArgumentException("Missing JSON field");
-        int colon = json.indexOf(':', keyIndex + key.length());
-        if (colon < 0) throw new IllegalArgumentException("Invalid JSON field");
-        int cursor = colon + 1;
-        while (cursor < json.length() && Character.isWhitespace(json.charAt(cursor))) cursor++;
+        int cursor = fieldValueStart(json, field);
+        if (cursor < 0) throw new IllegalArgumentException("Missing JSON field");
         if (cursor >= json.length() || json.charAt(cursor) != '"') throw new IllegalArgumentException("JSON field must be a string");
 
         StringBuilder result = new StringBuilder();
@@ -48,21 +43,46 @@ public final class JsonUtil {
     }
 
     public static String stringFieldOrDefault(String json, String field, String fallback) {
-        String key = "\"" + field + "\"";
-        if (json == null || json.indexOf(key) < 0) return fallback;
+        if (fieldValueStart(json, field) < 0) return fallback;
         return stringField(json, field);
     }
 
     public static boolean booleanFieldOrDefault(String json, String field, boolean fallback) {
-        String key = "\"" + field + "\"";
-        int keyIndex = json == null ? -1 : json.indexOf(key);
-        if (keyIndex < 0) return fallback;
-        int colon = json.indexOf(':', keyIndex + key.length());
-        if (colon < 0) throw new IllegalArgumentException("Invalid JSON field");
-        String value = json.substring(colon + 1).trim().toLowerCase();
-        if (value.startsWith("true")) return true;
-        if (value.startsWith("false")) return false;
+        int cursor = fieldValueStart(json, field);
+        if (cursor < 0) return fallback;
+        if (booleanToken(json, cursor, "true")) return true;
+        if (booleanToken(json, cursor, "false")) return false;
         throw new IllegalArgumentException("JSON field must be boolean");
+    }
+
+    // Skip complete string tokens, and only match a property followed by a colon.
+    // Looking for quoted text alone also matches values such as name="password".
+    private static int fieldValueStart(String json, String field) {
+        if (json == null) return -1;
+        for (int index = 0; index < json.length(); index++) {
+            if (json.charAt(index) != '"') continue;
+            int start = ++index;
+            for (; index < json.length(); index++) {
+                char current = json.charAt(index);
+                if (current == '\\') { index++; continue; }
+                if (current == '"') break;
+            }
+            if (index >= json.length()) throw new IllegalArgumentException("Unterminated JSON string");
+            if (!json.substring(start, index).equals(field)) continue;
+            int next = index + 1;
+            while (next < json.length() && Character.isWhitespace(json.charAt(next))) next++;
+            if (next >= json.length() || json.charAt(next) != ':') continue;
+            next++;
+            while (next < json.length() && Character.isWhitespace(json.charAt(next))) next++;
+            return next;
+        }
+        return -1;
+    }
+
+    private static boolean booleanToken(String json, int cursor, String token) {
+        if (!json.startsWith(token, cursor)) return false;
+        int end = cursor + token.length();
+        return end == json.length() || Character.isWhitespace(json.charAt(end)) || ",}]".indexOf(json.charAt(end)) >= 0;
     }
 
     public static String quote(String value) {

@@ -12,7 +12,7 @@ GridBase is a local browser workspace for querying and changing Spark Thrift / H
 
 ## Operating Context
 
-The .env file contains only PORT, QUERY_TIMEOUT_MS, and DEFAULT_QUERY_LIMIT. Java startup never creates a database connection from environment credentials; users add all data sources through the UI. Add connection is in the left Database panel. Up to 20 runtime connections coexist in server memory. Each console and metadata request targets a stable connection ID; switching explorer selection never redirects a console. Only Hive uses the s3tables catalog. Browser storage excludes passwords and JDBC URLs; reconnect after a server restart requires credentials again.
+The .env file contains only PORT, QUERY_TIMEOUT_MS, and DEFAULT_QUERY_LIMIT. Java startup never creates a database connection from environment credentials; users add all data sources through the UI. Add connection is in the left Database panel. Up to 20 profiles persist in encrypted SQLite on the server, backed by a Docker volume. Save works without opening a remote connection; Edit loads password and complete JDBC URL. Startup restores profiles disconnected without an implicit default. Disconnect retains configuration; Delete removes it. Each console and metadata request targets a stable connection ID; switching explorer selection never redirects a console. Only Hive uses the s3tables catalog. Browser storage excludes passwords and JDBC URLs. Old browser-only profiles need one-time credential re-entry.
 
 ## Capabilities and Constraints
 

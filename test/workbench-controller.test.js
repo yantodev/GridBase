@@ -5,7 +5,8 @@ const fs = require('node:fs');
 const vm = require('node:vm');
 const C = require('../public/workbench-core');
 function setup({configured=true,offline=false,storage=new Map(),connections}={}) {
-  let sources=connections || (configured ? [{id:'default',name:'Spark Thrift / Hive',type:'hive'}] : []);
+  let sources=(connections || (configured ? [{id:'default',name:'Spark Thrift / Hive',type:'hive'}] : [])).map(item=>({connected:true,...item}));
+  const settings=new Map(sources.map(item=>[item.id,{...item,host:'fixture',port:item.type==='mysql'?'3306':'5432',database:'app',username:'fixture',password:'saved-secret',jdbcUrl:item.type==='hive'?'jdbc:hive2://fixture/app;token=saved-token':`jdbc:${item.type}://fixture/app`}]));
   let document;
   class Element {
     constructor(tag='div') {
@@ -46,21 +47,27 @@ function setup({configured=true,offline=false,storage=new Map(),connections}={})
   nodes.get('#run-query').append(new Element('span'));
   const workspace=new Element();nodes.set('.workbench',workspace);
   document={body:new Element('body'),activeElement:null,querySelector(selector){const found=nodes.get(selector)||[...nodes.values()].flatMap(n=>n.querySelectorAll('*')).find(n=>selector==='#'+n.id);assert.ok(found,'Unknown DOM selector: '+selector);return found;},createElement:tag=>new Element(tag),createElementNS:(ns,tag)=>new Element(tag),addEventListener(){}};
-  let queryResponse=null, connectResponse=null, metadataResponse=null;
+  let queryResponse=null, connectResponse=null, metadataResponse=null, detailsResponse=null;
   const requests=[];
   const fixture=(count=23)=>({columns:['id','name'],rows:Array.from({length:count},(_,i)=>({id:String(i+1),name:i===0?null:'row '+(i+1)})),rowCount:count,durationMs:12,truncated:false,updateCount:null});
   const context=vm.createContext({document,window:{WorkbenchCore:C,localStorage:{getItem:key=>storage.get(key)||null,setItem:(key,value)=>storage.set(key,value)},matchMedia:()=>({matches:false,addEventListener(){}}),clearTimeout(){},setTimeout(){},addEventListener(){},confirm:()=>true},fetch:async(url,options)=>{
     requests.push({url,options});if(offline)throw new Error('offline');
     let data;
     if(url==='/api/health')data={configured,target:'fixture.example'};
-    else if(url==='/api/connections')data={connections:sources,defaultConnectionId:sources[0]?.id || null};
-    else if(url==='/api/connections/connect') {
+    else if(url==='/api/connections' && options?.method!=='POST')data={connections:sources,defaultConnectionId:sources.find(item=>item.connected)?.id || null};
+    else if(url==='/api/connections/connect' || url==='/api/connections' && options?.method==='POST') {
       if(connectResponse)await connectResponse;
-      const payload=JSON.parse(options.body),connection={id:payload.connectionId || 'added-'+sources.length,name:payload.name,type:payload.type};
+      const payload=JSON.parse(options.body),connection={id:payload.connectionId || 'added-'+sources.length,name:payload.name,type:payload.type,connected:url.endsWith('/connect')};
+      settings.set(connection.id,{...payload,id:connection.id});
       sources=sources.filter(item=>item.id!==connection.id).concat(connection);data={ok:true,connection};
     }
-    else if(url==='/api/connections/disconnect'){const {connectionId}=JSON.parse(options.body);sources=sources.filter(item=>item.id!==connectionId);data={ok:true};}
+    else if(url==='/api/connections/disconnect'){const {connectionId}=JSON.parse(options.body);sources=sources.map(item=>item.id===connectionId?{...item,connected:false}:item);data={ok:true};}
     else if(url==='/api/connections/test')data={ok:true};
+    else if(url.startsWith('/api/connections/')) {
+      const id=url.split('/').at(-1);
+      if(options?.method==='DELETE'){sources=sources.filter(item=>item.id!==id);settings.delete(id);data={ok:true};}
+      else data=detailsResponse?await detailsResponse(id):settings.get(id);
+    }
     else if(url.startsWith('/api/databases'))data=metadataResponse?await metadataResponse(url):{databases:['analytics']};
     else if(url.startsWith('/api/tables'))data={tables:Array.from({length:25},(_,i)=>'table_'+i)};
     else if(url.startsWith('/api/columns'))data={columns:[{name:'id',type:'bigint',comment:''}]};
@@ -69,7 +76,7 @@ function setup({configured=true,offline=false,storage=new Map(),connections}={})
     return {ok:true,json:async()=>data};
   },Event:class {constructor(type){this.type=type;}},Blob,URL,URLSearchParams});
   vm.runInContext(fs.readFileSync('public/app.js','utf8'),context);
-  return {context,nodes,storage,requests,fixture,setQuery:value=>{queryResponse=value;},setConnect:value=>{connectResponse=value;},setMetadata:value=>{metadataResponse=value;},get:id=>nodes.get('#'+id),read:code=>vm.runInContext(code,context)};
+  return {context,nodes,storage,requests,fixture,settings,setDetails:value=>{detailsResponse=value;},setQuery:value=>{queryResponse=value;},setConnect:value=>{connectResponse=value;},setMetadata:value=>{metadataResponse=value;},get:id=>nodes.get('#'+id),read:code=>vm.runInContext(code,context)};
 }
 const flush=async()=>{for(let i=0;i<4;i++)await new Promise(setImmediate);};
 test('explorer metadata, pagination, sorting/filtering, row detail and draft restoration',async()=>{
@@ -216,7 +223,7 @@ test('a restored console with a missing connection never falls back to another s
 
 test('reconnect locks disconnect and duplicate submissions until completion',async()=>{
   const app=setup({connections:[{id:'pg',name:'Orders',type:'postgresql'}]});await flush();
-  app.context.openConnectionManager(app.read("state.connections.get('pg')"));
+  await app.context.openConnectionManager(app.read("state.connections.get('pg')"));
   app.get('connection-password').value='fixture-secret';app.get('connection-username').value='fixture';app.get('connection-host').value='fixture';
   let finish;app.setConnect(new Promise(resolve=>{finish=resolve;}));
   const pending=app.context.requestConnection('/api/connections/connect');
@@ -251,4 +258,69 @@ test('out-of-order metadata responses cannot cross connections or replace a newe
   finish({databases:['stale_pg_schema']});await pending;
   assert.equal(app.read("state.connections.get('pg').schemas.join(',')"),'new_pg_schema');
   assert.equal(app.read("state.connections.get('my').schemas.join(',')"),'mysql_schema');
+});
+
+test('SQLite profiles restore disconnected and Edit fills password and complete JDBC without browser storage secrets',async()=>{
+  const app=setup({connections:[{id:'saved',name:'Saved Hive',type:'hive',connected:false}]});await flush();
+  assert.equal(app.get('run-query').disabled,true);
+  assert.equal(app.requests.filter(r=>r.url.startsWith('/api/databases')).length,0);
+  await app.context.openConnectionManager(app.read("state.connections.get('saved')"));
+  assert.equal(app.get('connection-password').value,'saved-secret');
+  assert.equal(app.get('connection-jdbc-url').value,'jdbc:hive2://fixture/app;token=saved-token');
+  assert.equal(app.get('connection-jdbc-wrap').hidden,false);
+  app.get('connection-password').value='updated-secret';
+  app.get('connection-jdbc-url').value='jdbc:hive2://updated/app;token=updated-token';
+  await app.context.requestConnection('/api/connections');
+  assert.equal(app.requests.filter(r=>r.url==='/api/connections/connect').length,0);
+  assert.equal(app.read('state.connections.size'),1);
+  assert.equal(app.read("state.connections.get('saved').connected"),false);
+  await app.context.openConnectionManager(app.read("state.connections.get('saved')"));
+  assert.equal(app.get('connection-password').value,'updated-secret');
+  assert.equal(app.get('connection-jdbc-url').value,'jdbc:hive2://updated/app;token=updated-token');
+  for(const value of app.storage.values())assert.doesNotMatch(value,/saved-secret|updated-secret|saved-token|updated-token|jdbc:hive2/);
+  app.context.closeConnectionManager();
+  assert.equal(app.get('connection-password').value,'');assert.equal(app.get('connection-jdbc-url').value,'');
+  await app.context.deleteConnection('saved');
+  assert.ok(app.requests.some(r=>r.url==='/api/connections/saved' && r.options?.method==='DELETE'));
+  await app.context.checkConnection();assert.equal(app.read('state.connections.size'),0);
+});
+
+test('PostgreSQL edit shows its JDBC URL and updates it when host and SSL change',async()=>{
+  const app=setup({connections:[{id:'pg',name:'PG',type:'postgresql',connected:false}]});await flush();
+  await app.context.openConnectionManager(app.read("state.connections.get('pg')"));
+  assert.equal(app.get('connection-jdbc-url').value,'jdbc:postgresql://fixture/app');
+  assert.equal(app.get('connection-jdbc-url').readOnly,true);
+  app.get('connection-host').value='changed.fixture';await app.get('connection-host').emit('input');
+  app.get('connection-ssl').checked=true;await app.get('connection-ssl').emit('input');
+  assert.equal(app.get('connection-jdbc-url').value,'jdbc:postgresql://changed.fixture:5432/app?sslmode=require');
+  await app.context.requestConnection('/api/connections');
+  assert.equal(app.settings.get('pg').host,'changed.fixture');
+  assert.equal(app.settings.get('pg').ssl,true);
+});
+
+test('late credential responses cannot overwrite another profile or repopulate a closed or new form',async()=>{
+  const app=setup({connections:[{id:'a',name:'A',type:'hive',connected:false},{id:'b',name:'B',type:'hive',connected:false}]});await flush();
+  let finish;app.setDetails(id=>id==='a'?new Promise(resolve=>{finish=resolve;}):app.settings.get(id));
+  let pending=app.context.openConnectionManager(app.read("state.connections.get('a')"));
+  assert.equal(app.get('save-connection').disabled,true);
+  await app.context.requestConnection('/api/connections');
+  assert.equal(app.requests.filter(r=>r.options?.method==='POST').length,0);
+  await app.context.editConnection(app.read("state.connections.get('b')"));
+  finish({...app.settings.get('a'),password:'late-secret'});await pending;
+  assert.equal(app.get('connection-name').value,'B');assert.notEqual(app.get('connection-password').value,'late-secret');
+  pending=app.context.editConnection(app.read("state.connections.get('a')"));
+  app.context.resetConnectionForm();finish({...app.settings.get('a'),password:'late-secret'});await pending;
+  assert.equal(app.get('connection-name').value,'');assert.equal(app.get('connection-password').value,'');
+  pending=app.context.editConnection(app.read("state.connections.get('a')"));
+  app.context.closeConnectionManager();finish({...app.settings.get('a'),password:'late-secret'});await pending;
+  assert.equal(app.get('connection-password').value,'');assert.equal(app.get('connection-jdbc-url').value,'');
+});
+
+test('old browser-only profiles request one-time credentials without silently creating a default',async()=>{
+  const storage=new Map([['gridbase:connections:v1',JSON.stringify([{id:'legacy',type:'hive',name:'Old connection',username:'fixture'}])]]);
+  const app=setup({configured:false,storage});await flush();
+  await app.context.openConnectionManager(app.read("state.connections.get('legacy')"));
+  assert.match(app.get('connection-form-status').textContent,/Isi password dan JDBC URL sekali lagi/);
+  assert.equal(app.get('connection-password').value,'');assert.equal(app.get('connection-jdbc-url').value,'');
+  assert.equal(app.get('run-query').disabled,true);
 });

@@ -59,10 +59,7 @@ public final class ThriftQueryServer {
     void start(int port) throws IOException {
         server = HttpServer.create(new InetSocketAddress(config.host, port), 0);
         server.createContext("/api/health", this::health);
-        server.createContext("/api/connections", this::listConnections);
-        server.createContext("/api/connections/test", this::testConnection);
-        server.createContext("/api/connections/connect", this::connect);
-        server.createContext("/api/connections/disconnect", this::disconnect);
+        server.createContext("/api/connections", this::connectionRoutes);
         server.createContext("/api/query", this::query);
         server.createContext("/api/databases", this::databases);
         server.createContext("/api/namespaces", this::namespaces);
@@ -94,7 +91,7 @@ public final class ThriftQueryServer {
         synchronized (connections) {
             ConnectionRegistry.Entry entry = connections.defaultEntry();
             ConnectionProfile profile = entry == null ? null : entry.service().profile();
-            boolean configured = !connections.entries().isEmpty();
+            boolean configured = connections.entries().stream().anyMatch(ConnectionRegistry.Entry::connected);
             return "{\"status\":" + JsonUtil.quote(configured ? "ok" : "degraded")
                     + ",\"configured\":" + configured
                     + ",\"readOnly\":false"
@@ -123,15 +120,28 @@ public final class ThriftQueryServer {
         }
     }
 
+    private void connectionRoutes(HttpExchange exchange) throws IOException {
+        if ("POST".equals(exchange.getRequestMethod())) {
+            switch (exchange.getRequestURI().getPath()) {
+                case "/api/connections/test" -> { testConnection(exchange); return; }
+                case "/api/connections/connect" -> { connect(exchange); return; }
+                case "/api/connections/disconnect" -> { disconnect(exchange); return; }
+            }
+        }
+        listConnections(exchange);
+    }
+
     private void connect(HttpExchange exchange) throws IOException {
         if (!"POST".equals(exchange.getRequestMethod())) { methodNotAllowed(exchange); return; }
         try {
             String body = readBody(exchange);
-            ConnectionProfile candidate = ConnectionProfile.fromJson(body);
+            ConnectionSettings candidate = ConnectionSettings.fromJson(body);
             ConnectionRegistry.Entry entry = connections.connect(JsonUtil.stringFieldOrDefault(body, "connectionId", ""), candidate);
             sendJson(exchange, 200, "{\"ok\":true,\"connection\":" + entry.toJson() + "}");
         } catch (IllegalArgumentException error) {
             sendJson(exchange, 400, error(error.getMessage()));
+        } catch (ConnectionStore.StoreException error) {
+            sendJson(exchange, 503, error(error.getMessage()));
         } catch (ClassNotFoundException error) {
             logDatabaseFailure(error);
             sendJson(exchange, 503, error("Driver JDBC tidak ditemukan. Tambahkan driver ke classpath Java."));
@@ -156,14 +166,37 @@ public final class ThriftQueryServer {
     }
 
     private void listConnections(HttpExchange exchange) throws IOException {
-        if (!"GET".equals(exchange.getRequestMethod())) { methodNotAllowed(exchange); return; }
-        String payload;
-        synchronized (connections) {
-            payload = "{\"defaultConnectionId\":" + JsonUtil.quote(connections.defaultId())
-                    + ",\"connections\":[" + connections.entries().stream().map(ConnectionRegistry.Entry::toJson).collect(Collectors.joining(",")) + "]}";
-        }
-        sendJson(exchange, 200, payload);
-        exchange.close();
+        String path = exchange.getRequestURI().getPath();
+        String method = exchange.getRequestMethod();
+        try {
+            if (path.equals("/api/connections")) {
+                if (method.equals("GET")) {
+                    synchronized (connections) {
+                        sendJson(exchange, 200, "{\"defaultConnectionId\":" + JsonUtil.quote(connections.defaultId())
+                                + ",\"connections\":[" + connections.entries().stream().map(ConnectionRegistry.Entry::toJson).collect(Collectors.joining(",")) + "]}");
+                    }
+                } else if (method.equals("POST")) {
+                    String body = readBody(exchange);
+                    var entry = connections.save(JsonUtil.stringFieldOrDefault(body, "connectionId", ""), ConnectionSettings.fromJson(body));
+                    sendJson(exchange, 200, "{\"ok\":true,\"connection\":" + entry.toJson() + "}");
+                } else methodNotAllowed(exchange);
+            } else if (path.matches("/api/connections/[a-zA-Z0-9_-]{1,100}")) {
+                String id = path.substring("/api/connections/".length());
+                if (method.equals("GET")) {
+                    String details = connections.details(id).toJson();
+                    sendJson(exchange, 200, "{\"id\":" + JsonUtil.quote(id) + "," + details.substring(1));
+                } else if (method.equals("DELETE")) {
+                    connections.delete(id);
+                    sendJson(exchange, 200, "{\"ok\":true}");
+                } else methodNotAllowed(exchange);
+            } else sendJson(exchange, 404, error("Endpoint tidak ditemukan."));
+        } catch (ConnectionRegistry.UnknownConnectionException error) {
+            sendJson(exchange, 404, error(error.getMessage()));
+        } catch (ConnectionStore.StoreException error) {
+            sendJson(exchange, 503, error(error.getMessage()));
+        } catch (IllegalArgumentException error) {
+            sendJson(exchange, 400, error(error.getMessage()));
+        } finally { exchange.close(); }
     }
 
     private void query(HttpExchange exchange) throws IOException {

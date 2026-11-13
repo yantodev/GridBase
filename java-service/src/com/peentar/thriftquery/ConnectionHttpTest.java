@@ -27,18 +27,25 @@ public final class ConnectionHttpTest {
         Path root = Files.createTempDirectory("gridbase-http");
         AppConfig config = AppConfig.load(root, Map.of());
         List<String> executed = new ArrayList<>();
-        ConnectionRegistry registry = new ConnectionRegistry(profile -> new JdbcService(config, profile, () -> fixture(profile, executed)));
+        ConnectionRegistry.ServiceFactory factory = profile -> new JdbcService(config, profile, () -> fixture(profile, executed));
+        ConnectionRegistry registry = new ConnectionRegistry(factory, new ConnectionStore(config.dataDir));
         ThriftQueryServer server = new ThriftQueryServer(config, registry);
         try {
             server.start(0);
             String base = "http://127.0.0.1:" + server.port();
             check(get(base, "/api/connections", 200).contains("\"connections\":[]"), "Initially empty");
+            post(base, "/api/connections", profile("postgresql", "Route-named", "test"), 200);
+            check(get(base, "/api/connections/test", 200).contains("fixture-secret"), "Valid IDs matching route names can be edited");
+            delete(base, "/api/connections/test", 200);
             String pg = JsonUtil.stringField(post(base, "/api/connections/connect", profile("postgresql", "Same name", ""), 200), "id");
             String my = JsonUtil.stringField(post(base, "/api/connections/connect", profile("mysql", "Same name", ""), 200), "id");
             check(!pg.equals(my), "Unique IDs despite duplicate names");
             String list = get(base, "/api/connections", 200);
             check(list.contains(pg) && list.contains(my), list);
             check(!list.contains("fixture-secret") && !list.contains("password"), "Credentials never returned");
+            String details = get(base, "/api/connections/" + pg, 200);
+            check(JsonUtil.stringField(details, "password").equals("fixture-secret"), "Explicit edit loads saved password");
+            check(JsonUtil.stringField(details, "jdbcUrl").equals("jdbc:postgresql://fixture:5432/app?sslmode=disable"), "Explicit edit loads canonical JDBC URL");
             for (String id : List.of(pg, my)) {
                 String type = id.equals(pg) ? "postgresql" : "mysql";
                 check(get(base, "/api/databases?connectionId=" + id, 200).contains(type + "_schema"), "Schema routing");
@@ -53,10 +60,12 @@ public final class ConnectionHttpTest {
                 check(post(base, "/api/query", "{\"connectionId\":\"" + pg + "\",\"sql\":\"" + sql + "\"}", 200).contains("\"rowCount\":50"), "Fallback limit 50");
             }
             post(base, "/api/connections/connect", profile("postgresql", "broken", pg), 502);
+            check(JsonUtil.stringField(get(base, "/api/connections/" + pg, 200), "name").equals("Same name"), "Failed reconnect preserves saved configuration");
             check(post(base, "/api/query", "{\"connectionId\":\"" + pg + "\",\"sql\":\"SELECT 1 LIMIT 1\"}", 200).contains("postgresql:Same name"), "Failed reconnect retains original");
             post(base, "/api/connections/connect", profile("mysql", "Reconnected", my), 200);
             check(post(base, "/api/query", "{\"connectionId\":\"" + my + "\",\"sql\":\"SELECT 1 LIMIT 1\"}", 200).contains("mysql:Reconnected"), "Reconnect retains ID");
             post(base, "/api/connections/disconnect", "{\"connectionId\":\"" + my + "\"}", 200);
+            check(get(base, "/api/connections/" + my, 200).contains("fixture-secret"), "Disconnect retains credentials for edit");
             for (String id : List.of(my, "unknown")) {
                 post(base, "/api/query", "{\"connectionId\":\"" + id + "\",\"sql\":\"DELETE FROM fixture\"}", 404);
                 get(base, "/api/databases?connectionId=" + id, 404);
@@ -66,14 +75,41 @@ public final class ConnectionHttpTest {
             }
             check(post(base, "/api/query", "{\"sql\":\"SELECT 1 LIMIT 1\"}", 200).contains("postgresql:Same name"), "Legacy default remains first connection");
             check(get(base, "/api/health", 200).contains("\"configured\":true"), "Health available");
+            Path database = config.dataDir.resolve("gridbase.sqlite"), blocked = config.dataDir.resolve("blocked.sqlite");
+            Files.move(database, blocked); Files.createDirectory(database);
+            try {
+                post(base, "/api/connections", profile("postgresql", "Cannot save", pg), 503);
+                post(base, "/api/connections/connect", profile("postgresql", "Cannot connect", pg), 503);
+                delete(base, "/api/connections/" + pg, 503);
+                check(JsonUtil.stringField(get(base, "/api/connections/" + pg, 200), "name").equals("Same name"), "Storage failure preserves runtime settings");
+                check(post(base, "/api/query", "{\"connectionId\":\"" + pg + "\",\"sql\":\"SELECT 1 LIMIT 1\"}", 200).contains("postgresql:Same name"), "Storage failure preserves active service");
+            } finally { Files.delete(database); Files.move(blocked, database); }
             check(executed.stream().noneMatch(value -> value.contains("DELETE")), "Unknown-ID writes must never execute");
             post(base, "/api/connections/connect", profile("mysql", "Remaining", my), 200);
             post(base, "/api/connections/disconnect", "{\"connectionId\":\"" + pg + "\"}", 200);
             post(base, "/api/query", "{\"sql\":\"DELETE FROM fixture\"}", 503);
             check(get(base, "/api/health", 200).contains("\"configured\":true"), "Remaining explicit connection is configured");
             check(post(base, "/api/query", "{\"connectionId\":\"" + my + "\",\"sql\":\"SELECT 1 LIMIT 1\"}", 200).contains("mysql:Remaining"), "Explicit remaining source still works");
+            String saved = JsonUtil.stringField(post(base, "/api/connections", profile("postgresql", "broken", ""), 200), "id");
+            check(get(base, "/api/connections/" + saved, 200).contains("fixture-secret"), "Offline save does not test the remote database");
+            post(base, "/api/connections", profile("postgresql", "Updated offline", saved).replace("fixture-secret", "updated-secret"), 200);
+            server.stop();
+            registry = new ConnectionRegistry(factory, new ConnectionStore(config.dataDir));
+            server = new ThriftQueryServer(config, registry); server.start(0);
+            base = "http://127.0.0.1:" + server.port();
+            check(get(base, "/api/connections", 200).contains("\"defaultConnectionId\":null"), "Restart has no implicit default");
+            check(registry.entries().stream().noneMatch(ConnectionRegistry.Entry::connected), "Restart restores only disconnected profiles");
+            check(get(base, "/api/health", 200).contains("\"configured\":false"), "Saved profiles are not active connections");
+            check(get(base, "/api/connections/" + saved, 200).contains("updated-secret"), "Updated password survives restart");
+            post(base, "/api/query", "{\"connectionId\":\"" + saved + "\",\"sql\":\"DELETE FROM fixture\"}", 404);
+            delete(base, "/api/connections/" + saved, 200);
+            get(base, "/api/connections/" + saved, 404);
+            check(!new ConnectionStore(config.dataDir).load().containsKey(saved), "Deletion persists in SQLite");
             System.out.println("Multi-connection HTTP tests passed (synthetic JDBC)");
-        } finally { server.stop(); Files.deleteIfExists(root); }
+        } finally {
+            server.stop();
+            try (var paths = Files.walk(root)) { for (Path path : paths.sorted(java.util.Comparator.reverseOrder()).toList()) Files.deleteIfExists(path); }
+        }
     }
 
     private static Connection fixture(ConnectionProfile profile, List<String> executed) throws SQLException {
@@ -133,9 +169,13 @@ public final class ConnectionHttpTest {
     private static String post(String base, String path, String body, int status) throws Exception {
         return request(HttpRequest.newBuilder(URI.create(base + path)).header("Content-Type", "application/json").POST(HttpRequest.BodyPublishers.ofString(body)).build(), status);
     }
+    private static String delete(String base, String path, int status) throws Exception {
+        return request(HttpRequest.newBuilder(URI.create(base + path)).DELETE().build(), status);
+    }
     private static String request(HttpRequest request, int status) throws Exception {
         HttpResponse<String> response = CLIENT.send(request, HttpResponse.BodyHandlers.ofString());
         check(response.statusCode() == status, request.uri().getPath() + " expected " + status + ", got " + response.statusCode() + ": " + response.body());
+        check(response.headers().firstValue("Cache-Control").orElse("").equals("no-store"), "API responses must not be cached");
         return response.body();
     }
     private static <T> T proxy(Class<T> type, InvocationHandler handler) { return type.cast(Proxy.newProxyInstance(type.getClassLoader(), new Class[]{type}, handler)); }

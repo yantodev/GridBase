@@ -21,7 +21,9 @@ public final class AppConfigTest {
             Files.delete(root.resolve(".env"));
             AppConfig defaults = AppConfig.load(root, Map.of());
             check(defaults.port == 4173 && defaults.timeoutSeconds == 30 && defaults.defaultQueryLimit == 50, "Server defaults");
-        } finally { Files.deleteIfExists(root.resolve(".env")); Files.deleteIfExists(root); }
+        } finally {
+            try (var paths = Files.walk(root)) { for (Path path : paths.sorted(java.util.Comparator.reverseOrder()).toList()) Files.deleteIfExists(path); }
+        }
         System.out.println("App config tests passed");
     }
     private static void check(boolean ok, String message) { if (!ok) throw new AssertionError(message); }

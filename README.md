@@ -11,7 +11,8 @@
 
 GUI lokal untuk membaca, membuat, memperbarui, dan menghapus data melalui JDBC langsung dari Java.
 Connection manager bergaya DataGrip mendukung Spark Thrift / Hive, PostgreSQL, dan MySQL.
-Password dikirim hanya saat test/connect. Password dan JDBC URL tidak disimpan di browser.
+Konfigurasi, termasuk password dan JDBC URL, disimpan terenkripsi di SQLite pada server.
+Browser tidak menyimpan kedua nilai tersebut di localStorage.
 
 ## Workspace bergaya DataGrip
 
@@ -30,7 +31,8 @@ Implementasi ini mempertahankan branding GridBase dan tidak memakai aset JetBrai
 ## Konfigurasi koneksi
 
 Klik **Add connection** di panel **Database sebelah kiri**. Pilih PostgreSQL, MySQL,
-atau Spark Thrift / Hive, isi detail koneksi, lalu gunakan **Test connection** atau **Connect**.
+atau Spark Thrift / Hive, isi detail koneksi, lalu gunakan **Save**, **Test connection**, atau **Connect**.
+Save menyimpan konfigurasi tanpa menghubungi database; Connect menguji dan menyimpan koneksi.
 Maksimal 20 koneksi dapat tersedia bersamaan. Nama boleh sama; setiap koneksi mempunyai ID sendiri.
 
 - Expand masing-masing data source untuk melihat schema, tabel, dan kolomnya.
@@ -40,10 +42,17 @@ Maksimal 20 koneksi dapat tersedia bersamaan. Nama boleh sama; setiap koneksi me
   di explorer tidak mengubah koneksi tab yang sudah ada. Pilihan dikunci selama eksekusi.
 - Ikon pengaturan pada data source membuka detailnya untuk reconnect atau **Disconnect**.
   Disconnect hanya memutus koneksi tersebut; tabnya tetap tersimpan dan tidak dialihkan otomatis.
-- Profil non-secret, hubungan tab dengan koneksi, dan riwayat tersimpan di browser. Koneksi
-  aktif beserta kredensialnya hanya berada di memori server: reload browser tetap mengenalinya,
-  sedangkan restart server membutuhkan reconnect. Tidak ada koneksi database otomatis saat startup.
-  Untuk profil Hive, JDBC URL dan password perlu diisi lagi saat reconnect.
+- **Edit** memuat konfigurasi tersimpan, termasuk password yang tetap ditampilkan sebagai karakter
+  tertutup dan JDBC URL lengkap. Untuk PostgreSQL/MySQL, URL mengikuti host, port, database, dan SSL.
+- Konfigurasi tersimpan di `data/gridbase.sqlite`; seluruh detail dienkripsi AES-GCM menggunakan
+  kunci otomatis `data/credentials.key`. Keduanya dibutuhkan untuk backup/pemulihan. Folder data
+  dan driver lokal diabaikan Git dan Docker build. Jangan menghapus kunci ketika masih memakai database itu.
+- Setelah restart, profil dipulihkan dalam status disconnected tanpa koneksi default. Klik Connect
+  untuk mengaktifkan koneksi lagi. Disconnect mempertahankan konfigurasi; ikon hapus menghapusnya dari server.
+- Profil lama yang hanya ada di browser belum memiliki password/JDBC tersimpan. Isi ulang sekali,
+  lalu Save atau Connect. Nilai yang sebelumnya tidak disimpan tidak bisa dipulihkan.
+- Akses aplikasi memberi akses ke kredensial melalui endpoint Edit. Gunakan workbench ini pada
+  lingkungan tepercaya; daftar koneksi dan health tidak mengembalikan password atau parameter JDBC rahasia.
 
 Image Docker sudah membawa driver JDBC PostgreSQL dan MySQL. Untuk menjalankan lokal, letakkan
 driver tambahan di folder `drivers/` atau set `JDBC_DRIVER_DIR` ke folder yang berisi
@@ -65,7 +74,7 @@ sebagai port akses di host.
 Semua koneksi PostgreSQL, MySQL, dan Spark Thrift / Hive ditambahkan dari **Add connection**
 di panel Database. Kredensial Spark lama dari `.env` atau environment tidak membuat
 koneksi default di backend Java. Aplikasi mulai dengan daftar koneksi aktif kosong;
-profil yang tersimpan di browser perlu dihubungkan kembali setelah restart server.
+profil SQLite tetap tersedia untuk Edit dan perlu dihubungkan kembali setelah restart server.
 
 Jika belum ada koneksi, status menunjukkan `Not configured` dan tombol query dinonaktifkan.
 Username dan password tidak dikembalikan oleh endpoint health.
@@ -73,7 +82,10 @@ Username dan password tidak dikembalikan oleh endpoint health.
 ## Menjalankan secara lokal
 
 Mode lokal membutuhkan instalasi Spark 3.5.6 yang memiliki Hive JDBC driver. PostgreSQL/MySQL
-membutuhkan driver JDBC tambahan seperti dijelaskan di atas:
+membutuhkan driver JDBC tambahan seperti dijelaskan di atas.
+
+Script startup dan pengujian mengunduh driver SQLite versi terkunci dari Maven Central ke
+`build/deps` dan memverifikasi SHA-256. Unduhan hanya diperlukan bila cache belum tersedia.
 
 ```bash
 ls /home/buana/.local/opt/spark-3.5.6-bin-hadoop3/jars/hive-jdbc-2.3.9.jar
@@ -100,8 +112,9 @@ Image menyediakan Java runtime, distribusi Apache Spark 3.5.6 lengkap di
 `/opt/spark`, serta Hive JDBC client secara otomatis.
 
 Compose menjalankan aplikasi workbench. Spark Thrift Server yang menjadi target
-query tetap harus tersedia sebagai service eksternal dan dikonfigurasi melalui
-`.env` seperti pada bagian konfigurasi koneksi.
+query tetap harus tersedia sebagai service eksternal dan ditambahkan melalui Add connection.
+Volume bernama `gridbase-data` dipasang pada `/app/data` sehingga profil dan kunci enkripsi
+bertahan saat container dibuat ulang. `docker compose down -v` menghapus volume beserta konfigurasi.
 
 ```bash
 docker compose up --build -d
@@ -162,8 +175,11 @@ Kontrak API tersedia di [`openapi.yaml`](./openapi.yaml):
 - `GET /api/health` — status konfigurasi tanpa mengembalikan secret.
 - `POST /api/connections/test` — menguji detail JDBC tanpa mengaktifkannya.
 - `GET /api/connections` — daftar koneksi dengan ID stabil dan metadata tanpa secret.
-- `POST /api/connections/connect` — tambah koneksi; sertakan `connectionId` untuk reconnect ID yang sama.
-- `POST /api/connections/disconnect` — body `{ "connectionId": "..." }`, menghapus satu koneksi dari memori.
+- `POST /api/connections` — simpan konfigurasi tanpa menghubungi database; `connectionId` memperbarui profil yang sama dan menonaktifkannya sampai Connect.
+- `GET /api/connections/{id}` — detail untuk Edit, termasuk password/JDBC lengkap; respons `Cache-Control: no-store`.
+- `DELETE /api/connections/{id}` — hapus konfigurasi tersimpan dan nonaktifkan koneksinya.
+- `POST /api/connections/connect` — uji, simpan, dan aktifkan koneksi; sertakan `connectionId` untuk reconnect ID yang sama.
+- `POST /api/connections/disconnect` — body `{ "connectionId": "..." }`, nonaktifkan koneksi tanpa menghapus konfigurasinya.
 - `GET /api/databases?connectionId=...` — daftar schema/database dari koneksi yang dipilih.
 - `GET /api/tables?connectionId=...&namespace=...` — daftar tabel pada namespace.
 - `GET /api/columns?connectionId=...&namespace=...&table=...` — daftar kolom, tipe, dan komentar.

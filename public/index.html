@@ -86,22 +86,22 @@
   </div>
   <dialog id="connection-dialog" class="workbench-dialog connection-dialog" aria-labelledby="connection-heading">
     <form id="connection-form">
-      <header class="dialog-heading"><div><h2 id="connection-heading">Database connections</h2><p class="dialog-subtitle">Tambahkan beberapa koneksi. Password dan JDBC URL tidak disimpan di browser; koneksi aktif disimpan di memori server.</p></div><button id="close-connection" class="icon-button" type="button" aria-label="Close connection manager"><svg><use href="#i-close"/></svg></button></header>
+      <header class="dialog-heading"><div><h2 id="connection-heading">Database connections</h2><p class="dialog-subtitle">Simpan koneksi untuk digunakan kembali. Save menyimpan konfigurasi tanpa membuka koneksi.</p></div><button id="close-connection" class="icon-button" type="button" aria-label="Close connection manager"><svg><use href="#i-close"/></svg></button></header>
       <div class="connection-layout">
         <aside class="saved-connections"><div class="saved-heading"><span>Saved connections</span><button id="new-connection" class="text-button" type="button">New</button></div><div id="saved-connection-list"></div></aside>
-        <div class="connection-fields">
+        <div id="connection-fields" class="connection-fields">
           <label for="connection-name">Name</label><input id="connection-name" maxlength="80" required autocomplete="off" placeholder="Local PostgreSQL" />
           <label for="database-type">Database</label><select id="database-type"><option value="postgresql">PostgreSQL</option><option value="mysql">MySQL</option><option value="hive">Spark Thrift / Hive</option></select>
           <div class="field-grid"><div><label for="connection-host">Host</label><input id="connection-host" required autocomplete="off" placeholder="127.0.0.1" /></div><div><label for="connection-port">Port</label><input id="connection-port" inputmode="numeric" required autocomplete="off" placeholder="5432" /></div></div>
           <label for="connection-database">Database / schema</label><input id="connection-database" required autocomplete="off" placeholder="postgres" />
-          <div id="connection-jdbc-wrap" hidden><label for="connection-jdbc-url">JDBC URL</label><input id="connection-jdbc-url" autocomplete="off" placeholder="jdbc:hive2://spark.example:443/default;transportMode=http" /></div>
+          <div id="connection-jdbc-wrap"><label for="connection-jdbc-url">JDBC URL</label><input id="connection-jdbc-url" autocomplete="off" placeholder="jdbc:hive2://spark.example:443/default;transportMode=http" /></div>
           <label for="connection-username">Username</label><input id="connection-username" required autocomplete="username" />
-          <label for="connection-password">Password</label><input id="connection-password" type="password" autocomplete="current-password" placeholder="Password tidak disimpan" />
+          <label for="connection-password">Password</label><input id="connection-password" type="password" autocomplete="current-password" />
           <label class="checkbox-field"><input id="connection-ssl" type="checkbox" /> Use SSL</label>
           <p id="connection-form-status" class="form-status" role="status" aria-live="polite"></p>
         </div>
       </div>
-      <div class="dialog-actions"><button id="disconnect-connection" class="tool-button" type="button" hidden>Disconnect</button><button id="test-connection" class="tool-button" type="button">Test connection</button><button id="cancel-connection" class="tool-button" type="button">Cancel</button><button id="connect-connection" class="primary-button" type="submit">Connect</button></div>
+      <div class="dialog-actions"><button id="disconnect-connection" class="tool-button" type="button" hidden>Disconnect</button><button id="test-connection" class="tool-button" type="button">Test connection</button><button id="cancel-connection" class="tool-button" type="button">Cancel</button><button id="save-connection" class="tool-button" type="button">Save</button><button id="connect-connection" class="primary-button" type="submit">Connect</button></div>
     </form>
   </dialog>
   <dialog id="rename-dialog" class="workbench-dialog" aria-labelledby="rename-heading"><form id="rename-form"><h2 id="rename-heading">Rename console</h2><label for="console-name">Console name</label><input id="console-name" maxlength="80" required autocomplete="off" /><div class="dialog-actions"><button id="cancel-rename" class="tool-button" type="button">Cancel</button><button class="primary-button" type="submit">Save</button></div></form></dialog>

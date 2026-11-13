@@ -2,7 +2,7 @@ openapi: 3.0.3
 info:
   title: GridBase API
   version: 0.3.0
-  description: Local API for querying and changing data through Java JDBC. Multiple connections coexist in server memory with stable IDs. Startup has no configured database connection; .env contains only server settings. Requests without an ID use the first connection added at runtime; an unknown explicit ID never falls back. Disconnecting the default clears the implicit target until another connect, without redirecting to other existing connections. Supported databases are Spark Thrift/Hive, PostgreSQL, and MySQL.
+  description: Local API for querying and changing data through Java JDBC. Connection profiles persist in an encrypted SQLite store with stable IDs. Startup restores profiles as disconnected, without an implicit default; .env contains only server settings. Requests without an ID use the first connection added at runtime; an unknown explicit ID never falls back. Disconnecting the default clears the implicit target until another connect, without redirecting to other existing connections. Supported databases are Spark Thrift/Hive, PostgreSQL, and MySQL.
 servers:
   - url: http://localhost:4173
 paths:
@@ -18,7 +18,7 @@ paths:
                 $ref: '#/components/schemas/HealthResponse'
   /api/connections:
     get:
-      summary: List all configured connections without credentials
+      summary: List saved profiles and connected states without credentials
       responses:
         '200':
           description: Configured connections and legacy default ID
@@ -32,6 +32,49 @@ paths:
                   connections:
                     type: array
                     items: { $ref: '#/components/schemas/Connection' }
+    post:
+      summary: Create or update a saved profile without opening a database connection
+      description: An updated profile becomes disconnected until Connect is requested. A failed store write preserves the previous profile.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ConnectionRequest' }
+      responses:
+        '200':
+          description: Configuration saved
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok: { type: boolean }
+                  connection: { $ref: '#/components/schemas/Connection' }
+        '400': { description: Invalid configuration }
+        '503': { description: Configuration storage unavailable }
+  /api/connections/{connectionId}:
+    parameters:
+      - in: path
+        name: connectionId
+        required: true
+        schema: { type: string, pattern: '^[a-zA-Z0-9_-]{1,100}$' }
+    get:
+      summary: Load a saved profile for editing, including credentials
+      description: Returns the full JDBC URL and password only on explicit edit. Responses use Cache-Control no-store. This local workbench uses application access as its trust boundary.
+      responses:
+        '200':
+          description: Saved configuration
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ConnectionDetails' }
+        '404': { description: Unknown profile }
+        '503': { description: Configuration storage unavailable }
+    delete:
+      summary: Delete the saved profile and disconnect it
+      responses:
+        '200': { description: Profile deleted }
+        '404': { description: Unknown profile }
+        '503': { description: Configuration storage unavailable }
   /api/connections/test:
     post:
       summary: Test a JDBC connection without activating it
@@ -48,7 +91,7 @@ paths:
         '503': { description: JDBC driver unavailable }
   /api/connections/connect:
     post:
-      summary: Test and add or reconnect one JDBC connection in server memory
+      summary: Test, persist, and connect one JDBC profile
       requestBody:
         required: true
         content:
@@ -70,7 +113,7 @@ paths:
         '503': { description: JDBC driver unavailable }
   /api/connections/disconnect:
     post:
-      summary: Remove only the specified connection from server memory
+      summary: Disconnect the specified connection while retaining its saved configuration
       requestBody:
         required: true
         content:
@@ -225,13 +268,21 @@ components:
   schemas:
     Connection:
       type: object
-      required: [id, type, name, target]
+      required: [id, type, name, target, connected]
       properties:
         id: { type: string }
         type: { type: string, enum: [hive, postgresql, mysql] }
         name: { type: string }
         label: { type: string }
         target: { type: string, description: Redacted JDBC target without credentials }
+        connected: { type: boolean }
+    ConnectionDetails:
+      allOf:
+        - $ref: '#/components/schemas/ConnectionRequest'
+        - type: object
+          required: [id, jdbcUrl, password]
+          properties:
+            id: { type: string }
     QueryRequest:
       type: object
       required: [sql]

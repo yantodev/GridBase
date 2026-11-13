@@ -43,6 +43,8 @@ public record ConnectionProfile(DatabaseType type, String name, String jdbcUrl, 
                 + ",\"target\":" + JsonUtil.quote(redactedUrl()) + "}";
     }
 
+    @Override public String toString() { return "ConnectionProfile[redacted]"; }
+
     public static ConnectionProfile fromJson(String json) {
         String typeValue = JsonUtil.stringField(json, "type");
         DatabaseType type = DatabaseType.parse(typeValue);

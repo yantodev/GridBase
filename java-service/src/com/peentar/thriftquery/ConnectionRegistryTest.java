@@ -55,7 +55,9 @@ public final class ConnectionRegistryTest {
             ConnectionRegistry defaults = new ConnectionRegistry(env);
             check(defaults.defaultId() == null && defaults.entries().isEmpty(), "No startup source, even with old Spark environment settings");
             System.out.println("Multi-connection registry tests passed");
-        } finally { Files.deleteIfExists(root); }
+        } finally {
+            try (var paths = Files.walk(root)) { for (Path path : paths.sorted(java.util.Comparator.reverseOrder()).toList()) Files.deleteIfExists(path); }
+        }
     }
     private static ConnectionProfile profile(String type, String name) {
         return ConnectionProfile.fromJson("{\"type\":\"" + type + "\",\"name\":\"" + name + "\",\"host\":\"fixture\",\"database\":\"app\",\"username\":\"fixture\",\"password\":\"fixture-secret\"}");

@@ -13,3 +13,8 @@ services:
       QUERY_TIMEOUT_MS: "${QUERY_TIMEOUT_MS:-30000}"
       DEFAULT_QUERY_LIMIT: "${DEFAULT_QUERY_LIMIT:-50}"
     restart: unless-stopped
+    volumes:
+      - gridbase-data:/app/data
+
+volumes:
+  gridbase-data:

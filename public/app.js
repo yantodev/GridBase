@@ -18,7 +18,7 @@ function safeConnectionProfile(profile) {
   return {id: typeof profile.id === 'string' && /^[a-zA-Z0-9_-]{1,100}$/.test(profile.id) ? profile.id : C.newTab().id.replace('sql-', 'connection-'),
     name: profile.name.slice(0, 80), type: profile.type,
     host: String(profile.host || '').slice(0, 256), port: String(profile.port || '').slice(0, 8),
-    database: String(profile.database || '').slice(0, 256), username: String(profile.username || '').slice(0, 256), ssl: Boolean(profile.ssl)};
+    database: String(profile.database || '').slice(0, 256), username: String(profile.username || '').slice(0, 256), ssl: Boolean(profile.ssl), serverSaved: Boolean(profile.serverSaved)};
 }
 function loadConnections() {
   try {
@@ -34,11 +34,11 @@ function saveConnections() {
 }
 const state = {
   ...C.restoreDrafts(readStorage(DRAFT_STORAGE_KEY)), history: loadHistory(), connectionProfiles: loadConnections(), configured: false,
-  connections: new Map(), selectedConnectionId: null, editingConnectionId: null, serverError: '', connectionPending: false,
+  connections: new Map(), selectedConnectionId: null, editingConnectionId: null, serverError: '', connectionPending: false, connectionLoading: false,
   sidebarOpen: !window.matchMedia('(max-width: 700px)').matches, tool: 'database',
 };
 const editor = $('#sql-editor');
-let saveTimer, completionRange, connectionCheckVersion = 0;
+let saveTimer, completionRange, connectionCheckVersion = 0, connectionFormVersion = 0;
 const active = () => state.tabs.find(t => t.id === state.activeId);
 function makeConnection(profile, connected = false) {
   return {...profile, connected, expanded: connected, schemas: [], schemaEntries: new Map(), columns: new Map(), metadataLoading: false, metadataError: '', metadataLoaded: false, version: 0};
@@ -90,7 +90,8 @@ async function api(url, options = {}) {
 function connectionType() { return $('#database-type').value; }
 function updateConnectionType() {
   const type = connectionType(), hive = type === 'hive';
-  $('#connection-jdbc-wrap').hidden = !hive;
+  $('#connection-jdbc-wrap').hidden = false;
+  $('#connection-jdbc-url').readOnly = !hive;
   for (const id of ['connection-host', 'connection-port']) {
     $('#' + id).disabled = hive;
     $('#' + id).required = !hive;
@@ -99,8 +100,16 @@ function updateConnectionType() {
   $('#connection-port').placeholder = type === 'mysql' ? '3306' : type === 'postgresql' ? '5432' : '10000';
   if (!$('#connection-port').value) $('#connection-port').value = type === 'mysql' ? '3306' : type === 'postgresql' ? '5432' : '10000';
   if (!$('#connection-database').value) $('#connection-database').value = type === 'hive' ? 'default' : type === 'mysql' ? 'mysql' : 'postgres';
+  updateJdbcUrl();
+}
+function updateJdbcUrl() {
+  const type = connectionType(); if (type === 'hive') return;
+  const host = $('#connection-host').value.trim(), port = $('#connection-port').value.trim(), database = encodeURIComponent($('#connection-database').value.trim()), ssl = $('#connection-ssl').checked;
+  $('#connection-jdbc-url').value = `jdbc:${type}://${host}:${port}/${database}?` + (type === 'postgresql' ? `sslmode=${ssl ? 'require' : 'disable'}` : `useSSL=${ssl}&allowPublicKeyRetrieval=true&serverTimezone=UTC`);
 }
 function resetConnectionForm() {
+  if (state.connectionPending) return;
+  ++connectionFormVersion; state.connectionLoading = false; updateConnectionBusy();
   state.editingConnectionId = null; $('#disconnect-connection').hidden = true;
   $('#connection-name').value = '';
   $('#database-type').value = 'postgresql';
@@ -122,13 +131,35 @@ function loadConnectionForm(profile) {
   $('#connection-host').value = profile.host || '';
   $('#connection-port').value = profile.port || '';
   $('#connection-database').value = profile.database || '';
-  $('#connection-jdbc-url').value = profile.jdbcUrl || '';
+  $('#connection-jdbc-url').value = '';
   $('#connection-username').value = profile.username || '';
-  $('#connection-password').value = '';
+  $('#connection-password').value = profile.password || '';
   $('#connection-ssl').checked = Boolean(profile.ssl);
-  $('#connection-form-status').textContent = profile.type === 'hive' ? 'Masukkan kembali JDBC URL dan password untuk menghubungkan ulang.' : 'Masukkan password untuk menghubungkan ulang.';
+  $('#connection-form-status').textContent = '';
   updateConnectionType();
-  $('#connection-password').focus();
+  if (profile.jdbcUrl) $('#connection-jdbc-url').value = profile.jdbcUrl;
+}
+async function editConnection(profile) {
+  if (state.connectionPending) return;
+  const version = ++connectionFormVersion;
+  loadConnectionForm({...state.connectionProfiles.find(item => item.id === profile.id), ...profile});
+  if (!state.connections.get(profile.id)?.serverSaved) {
+    state.connectionLoading = false; updateConnectionBusy();
+    $('#connection-form-status').textContent = 'Profil lama belum menyimpan kredensial. Isi password dan JDBC URL sekali lagi, lalu Save.';
+    return;
+  }
+  state.connectionLoading = true; updateConnectionBusy();
+  $('#connection-form-status').textContent = 'Loading saved connection…';
+  try {
+    const details = await api('/api/connections/' + encodeURIComponent(profile.id));
+    if (version !== connectionFormVersion) return;
+    loadConnectionForm(details);
+    $('#connection-name').focus();
+  } catch (error) {
+    if (version === connectionFormVersion) $('#connection-form-status').textContent = error.message;
+  } finally {
+    if (version === connectionFormVersion) { state.connectionLoading = false; updateConnectionBusy(); }
+  }
 }
 function connectionPayload() {
   const type = connectionType();
@@ -139,14 +170,14 @@ function connectionPayload() {
     host: $('#connection-host').value.trim(),
     port: $('#connection-port').value.trim(),
     database: $('#connection-database').value.trim(),
-    jdbcUrl: type === 'hive' ? $('#connection-jdbc-url').value.trim() : '',
+    jdbcUrl: $('#connection-jdbc-url').value.trim(),
     username: $('#connection-username').value,
     password: $('#connection-password').value,
     ssl: $('#connection-ssl').checked,
   };
 }
 function saveConnectionPayload(payload, connection) {
-  const safe = safeConnectionProfile({...payload, id:connection.id});
+  const safe = safeConnectionProfile({...payload, id:connection.id, serverSaved:true});
   const index = state.connectionProfiles.findIndex(item => item.id === safe.id);
   if (index < 0) state.connectionProfiles.unshift(safe);
   else state.connectionProfiles[index] = safe;
@@ -158,32 +189,52 @@ function renderSavedConnections() {
   if (!state.connectionProfiles.length) { root.append(element('p', 'pane-note', 'Belum ada koneksi tersimpan.')); return; }
   state.connectionProfiles.forEach(profile => {
     const row = element('div', 'saved-connection');
-    const load = button('', 'saved-connection-main', () => loadConnectionForm(profile));
+    const load = button('', 'saved-connection-main', () => editConnection(profile));
     load.append(icon('database'), element('span', '', profile.name), element('small', '', profile.type === 'postgresql' ? 'PostgreSQL' : profile.type === 'mysql' ? 'MySQL' : 'Spark Thrift / Hive'));
-    const remove = button('', 'saved-connection-remove', () => {
-      state.connectionProfiles = state.connectionProfiles.filter(item => item.id !== profile.id);
-      if (!state.connections.get(profile.id)?.connected) state.connections.delete(profile.id);
-      if (state.editingConnectionId === profile.id) resetConnectionForm();
-      saveConnections(); renderSavedConnections(); renderExplorer(); updateConnectionUI();
-    });
+    const remove = button('', 'saved-connection-remove', () => deleteConnection(profile.id));
     remove.append(icon('close'));
     remove.title = 'Remove saved connection'; remove.setAttribute('aria-label', 'Remove ' + profile.name); row.append(load, remove); root.append(row);
   });
 }
-function openConnectionManager(profile) {
+async function openConnectionManager(profile) {
+  if (state.connectionPending) return;
   renderSavedConnections(); resetConnectionForm(); $('#connection-dialog').showModal();
-  if (profile?.id) loadConnectionForm({...state.connectionProfiles.find(item => item.id === profile.id), ...profile});
+  if (profile?.id) await editConnection(profile);
   else $('#connection-name').focus();
 }
 function closeConnectionManager() {
+  ++connectionFormVersion; state.connectionLoading = false; updateConnectionBusy();
   $('#connection-password').value = ''; $('#connection-jdbc-url').value = ''; $('#connection-dialog').close();
 }
 function setConnectionBusy(busy) {
   state.connectionPending = busy;
-  for (const id of ['test-connection','connect-connection','disconnect-connection']) $('#' + id).disabled = busy;
+  updateConnectionBusy();
+}
+function updateConnectionBusy() {
+  const busy = state.connectionPending || state.connectionLoading;
+  for (const id of ['test-connection','connect-connection','save-connection','disconnect-connection']) $('#' + id).disabled = busy;
+  $('#connection-fields').inert = busy;
+  $('#new-connection').disabled = state.connectionPending;
+  for (const node of $('#saved-connection-list').querySelectorAll('button')) node.disabled = state.connectionPending;
+}
+async function deleteConnection(id) {
+  if (state.connectionPending) return;
+  ++connectionFormVersion; state.connectionLoading = false; setConnectionBusy(true);
+  try {
+    if (state.connections.get(id)?.serverSaved) await api('/api/connections/' + encodeURIComponent(id), {method:'DELETE'});
+    ++connectionCheckVersion; $('#retry-connection').disabled = false;
+    const previous = state.connections.get(id); if (previous) previous.version++;
+    state.connectionProfiles = state.connectionProfiles.filter(item => item.id !== id);
+    state.connections.delete(id);
+    setConnectionBusy(false);
+    if (state.editingConnectionId === id) resetConnectionForm();
+    saveConnections(); renderSavedConnections(); renderExplorer(); updateConnectionUI(); renderTabs();
+    setToast('Saved connection deleted.');
+  } catch (error) { $('#connection-form-status').textContent = error.message; }
+  finally { setConnectionBusy(false); }
 }
 async function disconnectConnection(id) {
-  if (state.connectionPending) return;
+  if (state.connectionPending || state.connectionLoading) return;
   setConnectionBusy(true);
   try {
     await api('/api/connections/disconnect', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({connectionId:id})});
@@ -195,22 +246,27 @@ async function disconnectConnection(id) {
   finally { setConnectionBusy(false); }
 }
 async function requestConnection(path) {
-  if (state.connectionPending) return null;
+  if (state.connectionPending || state.connectionLoading) return null;
+  if ($('#connection-form').reportValidity && !$('#connection-form').reportValidity()) return null;
   const payload = connectionPayload();
   if (!payload.name || !payload.username || !payload.password || (payload.type === 'hive' && !payload.jdbcUrl)) {
     $('#connection-form-status').textContent = 'Isi nama, username, password, dan detail koneksi terlebih dahulu.'; return null;
   }
-  setConnectionBusy(true); $('#connection-form-status').textContent = path.endsWith('/test') ? 'Testing connection…' : 'Connecting…';
+  const saving = path === '/api/connections', testing = path.endsWith('/test');
+  setConnectionBusy(true); $('#connection-form-status').textContent = testing ? 'Testing connection…' : saving ? 'Saving connection…' : 'Connecting…';
   try {
     const result = await api(path, {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(payload)});
     $('#connection-form-status').textContent = path.endsWith('/test') ? 'Connection successful.' : 'Connected.';
-    if (path.endsWith('/connect')) {
+    if (path.endsWith('/connect') || saving) {
       ++connectionCheckVersion; $('#retry-connection').disabled = false; state.serverError = '';
       const connection = result.connection;
       saveConnectionPayload(payload, connection);
       const previous = state.connections.get(connection.id); if (previous) previous.version++;
-      const source = makeConnection(connection, true); state.connections.set(source.id, source); state.selectedConnectionId = source.id;
+      const source = makeConnection({...connection, serverSaved:true}, !saving); state.connections.set(source.id, source); state.selectedConnectionId = source.id;
       closeConnectionManager();
+      if (saving) {
+        updateConnectionUI(); renderExplorer(); renderTabs(); setToast('Connection saved. Use Connect to open it.'); return result;
+      }
       if (!active().connectionId && !active().sql.trim()) { active().connectionId = source.id; persistDrafts(); }
       else addConsole('', undefined, undefined, source.id);
       updateConnectionUI(); renderExplorer(); await refreshMetadata(source.id); setToast('Connected to ' + payload.name + '.');
@@ -344,20 +400,27 @@ async function checkConnection() {
     if (version !== connectionCheckVersion) return;
     state.serverError = '';
     const live = new Set(data.connections.map(item => item.id));
+    state.connectionProfiles = state.connectionProfiles.filter(item => !item.serverSaved || live.has(item.id));
+    for (const [id, item] of state.connections) if (item.serverSaved && !live.has(id)) state.connections.delete(id);
     for (const item of state.connections.values()) if (!live.has(item.id)) {
       item.connected = false; item.version++; item.metadataLoading = false; item.metadataLoaded = false; item.schemas = []; item.schemaEntries.clear(); item.columns.clear();
     }
     for (const profile of data.connections) {
       const previous = state.connections.get(profile.id);
-      if (previous?.connected) Object.assign(previous, profile);
-      else state.connections.set(profile.id, makeConnection(profile, true));
+      const connected = profile.connected === true;
+      if (previous?.connected && connected) Object.assign(previous, profile, {serverSaved:true});
+      else { if (previous) previous.version++; state.connections.set(profile.id, makeConnection({...profile, serverSaved:true}, connected)); }
+      const safe = safeConnectionProfile({...state.connectionProfiles.find(item => item.id === profile.id), ...profile, serverSaved:true});
+      const index = state.connectionProfiles.findIndex(item => item.id === profile.id);
+      if (index < 0) state.connectionProfiles.push(safe); else state.connectionProfiles[index] = safe;
     }
+    saveConnections(); renderSavedConnections();
     if (!state.connections.has(state.selectedConnectionId)) state.selectedConnectionId = data.defaultConnectionId || data.connections[0]?.id || state.connections.keys().next().value || null;
     // Migrate old drafts once. An explicitly associated missing connection is never reassigned.
     for (const tab of state.tabs) if (!Object.hasOwn(tab,'connectionId') && data.defaultConnectionId) tab.connectionId = data.defaultConnectionId;
     persistDrafts(); updateConnectionUI(); renderExplorer(); renderTabs();
     await Promise.all(data.connections.map(item => {
-      const source = state.connections.get(item.id); return source.expanded && !source.metadataLoading ? refreshMetadata(item.id) : null;
+      const source = state.connections.get(item.id); return source.connected && source.expanded && !source.metadataLoading ? refreshMetadata(item.id) : null;
     }));
   } catch (error) {
     if (version !== connectionCheckVersion) return;
@@ -693,15 +756,18 @@ $('#console-connection').addEventListener('change',()=>{
   persistDrafts(); updateConnectionUI(); renderTabs(); renderResults(); renderExplorer();
 });
 $('#close-connection').addEventListener('click',closeConnectionManager);
-$('#connection-dialog').addEventListener('cancel',()=>{$('#connection-password').value='';$('#connection-jdbc-url').value='';});
+$('#connection-dialog').addEventListener('cancel',closeConnectionManager);
 $('#cancel-connection').addEventListener('click',closeConnectionManager);
 $('#new-connection').addEventListener('click',resetConnectionForm);
 $('#database-type').addEventListener('change',()=>{
+  $('#connection-jdbc-url').value = '';
   if (['5432','3306','10000'].includes($('#connection-port').value)) $('#connection-port').value='';
   if (['postgres','mysql','default'].includes($('#connection-database').value)) $('#connection-database').value='';
   updateConnectionType();
 });
 $('#test-connection').addEventListener('click',()=>requestConnection('/api/connections/test'));
+$('#save-connection').addEventListener('click',()=>requestConnection('/api/connections'));
+for (const id of ['connection-host','connection-port','connection-database','connection-ssl']) $('#' + id).addEventListener('input', updateJdbcUrl);
 $('#connection-form').addEventListener('submit',event=>{event.preventDefault();requestConnection('/api/connections/connect');});
 $('#clear-history').addEventListener('click',()=>{state.history=[];saveHistory();renderHistory();});
 for(const view of ['results','output']) {

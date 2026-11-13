@@ -1,5 +1,7 @@
 node_modules/
 build/
+data/
+drivers/
 .env
 .env.*
 !.env.example

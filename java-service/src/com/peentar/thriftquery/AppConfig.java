@@ -12,6 +12,7 @@ public final class AppConfig {
     public final int timeoutSeconds;
     public final int defaultQueryLimit;
     public final Path publicDir;
+    public final Path dataDir;
 
     private AppConfig(String host, int port, int timeoutSeconds, int defaultQueryLimit, Path publicDir) {
         this.host = host;
@@ -19,6 +20,7 @@ public final class AppConfig {
         this.timeoutSeconds = timeoutSeconds;
         this.defaultQueryLimit = defaultQueryLimit;
         this.publicDir = publicDir;
+        this.dataDir = publicDir.getParent().resolve("data");
     }
 
     public static AppConfig load(Path projectRoot) {
