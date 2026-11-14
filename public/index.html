@@ -11,6 +11,7 @@
   <svg class="icon-definitions" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><defs>
     <symbol id="i-database" viewBox="0 0 20 20"><ellipse cx="10" cy="4.5" rx="6" ry="2.5"/><path d="M4 4.5v11c0 3.3 12 3.3 12 0v-11M4 10c0 3.3 12 3.3 12 0"/></symbol>
     <symbol id="i-history" viewBox="0 0 20 20"><path d="M3 8a7 7 0 1 1 0 5M3 3v5h5M10 6v4l3 2"/></symbol>
+    <symbol id="i-activity" viewBox="0 0 20 20"><path d="M3 3h14v14H3ZM6 7h8M6 10h8M6 13h5"/></symbol>
     <symbol id="i-plus" viewBox="0 0 20 20"><path d="M10 4v12M4 10h12"/></symbol>
     <symbol id="i-close" viewBox="0 0 20 20"><path d="m5 5 10 10M5 15 15 5"/></symbol>
     <symbol id="i-refresh" viewBox="0 0 20 20"><path d="M16 7a6.5 6.5 0 1 0 .3 5M16 3v4h-4"/></symbol>
@@ -38,6 +39,7 @@
     <nav class="tool-rail" aria-label="Tool windows">
       <button id="database-tool" class="rail-button is-active" type="button" aria-label="Database explorer" title="Database explorer" aria-controls="sidebar" aria-expanded="true"><svg><use href="#i-database"/></svg></button>
       <button id="history-tool" class="rail-button" type="button" aria-label="Query history" title="Query history" aria-controls="sidebar" aria-expanded="false"><svg><use href="#i-history"/></svg></button>
+      <button id="activity-tool" class="rail-button" type="button" aria-label="Activity" title="Activity" aria-controls="sidebar activity-panel" aria-expanded="false"><svg><use href="#i-activity"/></svg></button>
     </nav>
     <button id="sidebar-backdrop" class="sidebar-backdrop" type="button" aria-label="Close tool window" hidden></button>
     <aside id="sidebar" class="sidebar" aria-label="Database explorer">
@@ -49,6 +51,21 @@
         <nav id="schema-list" class="schema-list" aria-label="Database objects" aria-busy="true"><p class="pane-note">Loading schemas…</p></nav>
       </div>
       <div id="history-view" class="sidebar-view" hidden><div class="history-heading"><span>Recent executions · <span id="history-count">0</span>/5</span><button id="clear-history" class="text-button" type="button">Clear</button></div><div id="history-list" class="history-list"></div></div>
+      <div id="activity-view" class="sidebar-view" hidden>
+        <form id="activity-filters" class="activity-filters">
+          <div id="activity-admin-filters" hidden>
+            <label for="activity-scope">Cakupan</label><select id="activity-scope"><option value="mine">Aktivitas saya</option><option value="all">Semua pengguna</option></select>
+            <label for="activity-user">Akun</label><select id="activity-user"><option value="">Semua akun</option></select>
+          </div>
+          <label for="activity-from">Dari (waktu lokal)</label><input id="activity-from" type="datetime-local" />
+          <label for="activity-to">Sampai (waktu lokal)</label><input id="activity-to" type="datetime-local" />
+          <label for="activity-action">Aktivitas</label><select id="activity-action"><option value="">Semua aktivitas</option></select>
+          <label for="activity-outcome">Status</label><select id="activity-outcome"><option value="">Semua status</option><option value="success">Berhasil</option><option value="failure">Gagal</option><option value="denied">Ditolak</option><option value="pending">Pending</option></select>
+          <label for="activity-connectionId">ID koneksi</label><input id="activity-connectionId" maxlength="100" autocomplete="off" placeholder="Semua koneksi" />
+          <button class="primary-button" type="submit">Terapkan filter</button>
+          <p class="pane-note">Riwayat tersimpan di server. Pending berarti hasil operasi belum tercatat.</p>
+        </form>
+      </div>
       <footer class="sidebar-footer">SQL drafts saved in this browser<br />Query results stay in memory</footer>
     </aside>
     <div id="sidebar-resizer" class="sidebar-resizer" role="separator" tabindex="0" aria-label="Explorer width" aria-orientation="vertical" aria-valuemin="200" aria-valuemax="420" aria-valuenow="260"></div>
@@ -83,8 +100,16 @@
         <div id="output-view" class="output-view" role="tabpanel" aria-labelledby="output-tab" hidden><pre id="query-output">No statements executed in this console.</pre></div>
       </section>
     </main>
+    <section id="activity-panel" class="activity-panel" aria-label="Riwayat aktivitas" hidden>
+      <header class="pane-heading"><h2>Activity</h2><button id="activity-refresh" class="tool-button" type="button">Muat ulang</button></header>
+      <p id="activity-status" class="pane-note" role="status" aria-live="polite"></p>
+      <div class="activity-table-wrap"><table id="activity-table" class="activity-table"></table></div>
+      <pre id="activity-detail" class="activity-detail" aria-label="Detail aktivitas" hidden></pre>
+      <nav class="activity-pagination" aria-label="Activity pagination"><button id="activity-next" class="tool-button" type="button" disabled>Berikutnya</button></nav>
+    </section>
     <footer class="statusbar"><span id="toast" role="status" aria-live="polite">Ready</span><span class="statusbar-right"><span id="server-state">Server configuration</span><span>UTF-8</span><span>SQL</span></span></footer>
   </div>
+  <div id="audit-warning" class="audit-warning" role="alert" hidden></div>
   <dialog id="connection-dialog" class="workbench-dialog connection-dialog" aria-labelledby="connection-heading">
     <form id="connection-form">
       <header class="dialog-heading"><div><h2 id="connection-heading">Database connections</h2><p class="dialog-subtitle">Simpan koneksi untuk digunakan kembali. Save menyimpan konfigurasi tanpa membuka koneksi.</p></div><button id="close-connection" class="icon-button" type="button" aria-label="Close connection manager"><svg><use href="#i-close"/></svg></button></header>
@@ -108,6 +133,7 @@
   <dialog id="rename-dialog" class="workbench-dialog" aria-labelledby="rename-heading"><form id="rename-form"><h2 id="rename-heading">Rename console</h2><label for="console-name">Console name</label><input id="console-name" maxlength="80" required autocomplete="off" /><div class="dialog-actions"><button id="cancel-rename" class="tool-button" type="button">Cancel</button><button class="primary-button" type="submit">Save</button></div></form></dialog>
   <dialog id="row-detail" class="workbench-dialog row-detail" aria-labelledby="row-detail-heading"><header class="pane-heading"><h2 id="row-detail-heading">Row detail</h2><button id="close-row-detail" class="icon-button" type="button" aria-label="Close row detail"><svg><use href="#i-close"/></svg></button></header><div id="row-detail-table-wrap" class="row-detail-table-wrap"></div></dialog>
   <script src="/workbench-core.js" defer></script>
+  <script src="/activity.js" defer></script>
   <script src="/session.js" defer></script>
 </body>
 </html>

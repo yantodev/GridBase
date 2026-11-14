@@ -28,6 +28,8 @@ public final class ThriftQueryServer {
     private final AppConfig config;
     private final ConnectionWorkspaces workspaces;
     private final GitHubAuth auth;
+    private final ActivityAudit audit;
+    private final ActivityApi activity;
     private final ExecutorService executor = Executors.newFixedThreadPool(8);
     private HttpServer server;
 
@@ -43,6 +45,8 @@ public final class ThriftQueryServer {
         this.config = config;
         this.workspaces = workspaces;
         this.auth = auth;
+        this.audit = new ActivityAudit(config);
+        this.activity = new ActivityApi(audit);
     }
 
     public static void main(String[] args) throws Exception {
@@ -64,6 +68,7 @@ public final class ThriftQueryServer {
 
     void start(int port) throws IOException {
         server = HttpServer.create(new InetSocketAddress(config.host, port), 0);
+        route("/api/activity", (exchange, connections) -> activity.handle(exchange, auth.user(exchange)));
         route("/api/health", this::health);
         route("/api/connections", this::connectionRoutes);
         route("/api/query", this::query);
@@ -82,17 +87,28 @@ public final class ThriftQueryServer {
     private interface AccountHandler { void handle(HttpExchange exchange, ConnectionRegistry connections) throws IOException; }
 
     private void route(String path, AccountHandler handler) {
-        server.createContext(path, exchange -> {
-            if (auth.handle(exchange)) return;
+        server.createContext(path, incoming -> {
+            ActivityAudit.Exchange exchange = audit.wrap(incoming, auth.user(incoming));
             try {
+                if (auth.handle(exchange, config.auditAdminIds)) return;
                 GitHubAuth.User user = auth.user(exchange);
-                if (exchange.getRequestURI().getPath().startsWith("/api/") && user == null) {
+                String actual = exchange.getRequestURI().getPath();
+                if (actual.startsWith("/api/") && user == null) {
                     sendJson(exchange, 401, error("Silakan login dengan GitHub.")); return;
                 }
-                ConnectionRegistry connections = user != null && exchange.getRequestURI().getPath().startsWith("/api/")
-                        ? workspaces.forOwner(user.id()) : null;
+                if (!path.equals("/") && !path.equals("/api/connections") && !path.equals("/api/activity") && !actual.equals(path)) {
+                    sendJson(exchange, 404, error("Endpoint tidak ditemukan.")); return;
+                }
+                exchange.beginOperation();
+                boolean profiles = actual.startsWith("/api/") && !actual.startsWith("/api/activity");
+                ConnectionRegistry connections = user != null && profiles ? workspaces.forOwner(user.id()) : null;
                 handler.handle(exchange, connections);
-            } catch (ConnectionStore.StoreException unavailable) { sendJson(exchange, 503, error(unavailable.getMessage())); }
+            } catch (AuditStore.Unavailable unavailable) { sendJson(exchange, 503, error(unavailable.getMessage())); }
+            catch (ConnectionStore.StoreException unavailable) { sendJson(exchange, 503, error(unavailable.getMessage())); }
+            catch (IllegalArgumentException invalid) { sendJson(exchange, 400, error("Request tidak valid.")); }
+            catch (Exception failure) {
+                if (exchange.getResponseCode() < 0) sendJson(exchange, 500, error("Request gagal diproses."));
+            } finally { exchange.close(); }
         });
     }
 
@@ -129,7 +145,9 @@ public final class ThriftQueryServer {
         if (!"POST".equals(exchange.getRequestMethod())) { methodNotAllowed(exchange); return; }
         try {
             String body = readBody(exchange);
-            connections.checkWritable(JsonUtil.stringFieldOrDefault(body, "connectionId", ""));
+            String id = JsonUtil.stringFieldOrDefault(body, "connectionId", "");
+            ActivityAudit.connection(exchange, id);
+            connections.checkWritable(id);
             ConnectionProfile candidate = ConnectionProfile.fromJson(body);
             connections.test(candidate);
             sendJson(exchange, 200, "{\"ok\":true,\"connection\":" + candidate.safeJson() + "}");
@@ -145,8 +163,6 @@ public final class ThriftQueryServer {
         } catch (SQLException error) {
             logDatabaseFailure(error);
             sendJson(exchange, 502, error(databaseFailureMessage("Koneksi", error)));
-        } finally {
-            exchange.close();
         }
     }
 
@@ -166,7 +182,8 @@ public final class ThriftQueryServer {
         try {
             String body = readBody(exchange);
             ConnectionSettings candidate = ConnectionSettings.fromJson(body);
-            ConnectionRegistry.Entry entry = connections.connect(JsonUtil.stringFieldOrDefault(body, "connectionId", ""), candidate);
+            String id = auditTarget(exchange, body, true);
+            ConnectionRegistry.Entry entry = connections.connect(id, candidate);
             sendJson(exchange, 200, "{\"ok\":true,\"connection\":" + entry.toJson() + "}");
         } catch (ConnectionRegistry.UnknownConnectionException error) {
             sendJson(exchange, 404, error(error.getMessage()));
@@ -180,21 +197,20 @@ public final class ThriftQueryServer {
         } catch (SQLException error) {
             logDatabaseFailure(error);
             sendJson(exchange, 502, error(databaseFailureMessage("Koneksi", error)));
-        } finally {
-            exchange.close();
         }
     }
 
     private void disconnect(HttpExchange exchange, ConnectionRegistry connections) throws IOException {
         if (!"POST".equals(exchange.getRequestMethod())) { methodNotAllowed(exchange); return; }
         try {
-            connections.disconnect(JsonUtil.stringField(readBody(exchange), "connectionId"));
+            String id = auditTarget(exchange, readBody(exchange), false);
+            connections.disconnect(id);
             sendJson(exchange, 200, "{\"ok\":true}");
         } catch (ConnectionRegistry.UnknownConnectionException error) {
             sendJson(exchange, 404, error(error.getMessage()));
         } catch (IllegalArgumentException error) {
             sendJson(exchange, 400, error("ID koneksi wajib diisi."));
-        } finally { exchange.close(); }
+        }
     }
 
     private void listConnections(HttpExchange exchange, ConnectionRegistry connections) throws IOException {
@@ -209,11 +225,13 @@ public final class ThriftQueryServer {
                     }
                 } else if (method.equals("POST")) {
                     String body = readBody(exchange);
-                    var entry = connections.save(JsonUtil.stringFieldOrDefault(body, "connectionId", ""), ConnectionSettings.fromJson(body));
+                    String id = auditTarget(exchange, body, true);
+                    var entry = connections.save(id, ConnectionSettings.fromJson(body));
                     sendJson(exchange, 200, "{\"ok\":true,\"connection\":" + entry.toJson() + "}");
                 } else methodNotAllowed(exchange);
             } else if (path.matches("/api/connections/[a-zA-Z0-9_-]{1,100}")) {
                 String id = path.substring("/api/connections/".length());
+                ActivityAudit.connection(exchange, id);
                 if (method.equals("GET")) {
                     String details = connections.details(id).toJson();
                     sendJson(exchange, 200, "{\"id\":" + JsonUtil.quote(id) + "," + details.substring(1));
@@ -228,7 +246,7 @@ public final class ThriftQueryServer {
             sendJson(exchange, 503, error(error.getMessage()));
         } catch (IllegalArgumentException error) {
             sendJson(exchange, 400, error(error.getMessage()));
-        } finally { exchange.close(); }
+        }
     }
 
     private void query(HttpExchange exchange, ConnectionRegistry connections) throws IOException {
@@ -239,12 +257,16 @@ public final class ThriftQueryServer {
         try {
             String body = readBody(exchange);
             String sql = JsonUtil.stringField(body, "sql");
+            ActivityAudit.sql(exchange, sql);
             SqlPolicy.Result validation = SqlPolicy.validate(sql, MAX_SQL_LENGTH);
             if (!validation.ok()) {
                 sendJson(exchange, 422, error(validation.error()));
                 return;
             }
-            sendJson(exchange, 200, connections.require(JsonUtil.stringFieldOrDefault(body, "connectionId", "")).query(validation.sql()).toJson());
+            JdbcService jdbc = auditedService(exchange, connections, JsonUtil.stringFieldOrDefault(body, "connectionId", ""));
+            var result = jdbc.query(validation.sql());
+            ActivityAudit.result(exchange, result);
+            sendJson(exchange, 200, "{\"requestId\":" + JsonUtil.quote(ActivityAudit.requestId(exchange)) + "," + result.toJson().substring(1));
         } catch (IllegalArgumentException error) {
             sendJson(exchange, 400, error("Request tidak valid."));
         } catch (ConnectionRegistry.UnknownConnectionException error) {
@@ -260,8 +282,6 @@ public final class ThriftQueryServer {
         } catch (SQLException error) {
             logDatabaseFailure(error);
             sendJson(exchange, 502, error(databaseFailureMessage("Query", error)));
-        } finally {
-            exchange.close();
         }
     }
 
@@ -280,7 +300,7 @@ public final class ThriftQueryServer {
             return;
         }
         try {
-            List<String> databases = connections.require(queryParams(exchange).get("connectionId")).databases();
+            List<String> databases = auditedService(exchange, connections, queryParams(exchange).get("connectionId")).databases();
             sendJson(exchange, 200, "{\"" + responseField + "\":" + JsonUtil.stringArray(databases) + "}");
         } catch (IllegalArgumentException error) {
             sendJson(exchange, 400, error("Parameter koneksi tidak valid."));
@@ -294,8 +314,6 @@ public final class ThriftQueryServer {
         } catch (ClassNotFoundException | SQLException error) {
             logDatabaseFailure(error);
             sendJson(exchange, 502, error(label + " tidak dapat dimuat. Periksa koneksi dan kredensial database."));
-        } finally {
-            exchange.close();
         }
     }
 
@@ -303,7 +321,7 @@ public final class ThriftQueryServer {
         if (!"GET".equals(exchange.getRequestMethod())) { methodNotAllowed(exchange); return; }
         try {
             Map<String, String> params = queryParams(exchange);
-            JdbcService jdbc = connections.require(params.get("connectionId"));
+            JdbcService jdbc = auditedService(exchange, connections, params.get("connectionId"));
             String namespace = params.get("namespace");
             String payload = columns
                     ? "{\"columns\":[" + jdbc.columns(namespace, params.get("table")).stream().map(JdbcService.Column::toJson).collect(Collectors.joining(",")) + "]}"
@@ -324,9 +342,26 @@ public final class ThriftQueryServer {
         } catch (SQLException error) {
             logDatabaseFailure(error);
             sendJson(exchange, 502, error("Metadata tidak dapat dimuat. Periksa koneksi database lalu refresh."));
-        } finally {
-            exchange.close();
         }
+    }
+
+    private static String auditTarget(HttpExchange exchange, String body, boolean create) {
+        String id = JsonUtil.stringFieldOrDefault(body, "connectionId", "");
+        if (create && id.isBlank()) id = java.util.UUID.randomUUID().toString();
+        ActivityAudit.connection(exchange, id);
+        return id;
+    }
+
+    private static JdbcService auditedService(HttpExchange exchange, ConnectionRegistry connections, String requestedId) {
+        String id;
+        JdbcService jdbc;
+        synchronized (connections) {
+            id = requestedId == null || requestedId.isBlank() ? connections.defaultId() : requestedId;
+            // Record even unknown targets, but capture the immutable service under the same lock.
+            ActivityAudit.connection(exchange, id);
+            jdbc = connections.require(id);
+        }
+        return jdbc;
     }
 
     private static Map<String, String> queryParams(HttpExchange exchange) {
@@ -368,7 +403,7 @@ public final class ThriftQueryServer {
         }
     }
 
-    private static String readBody(HttpExchange exchange) throws IOException {
+    static String readBody(HttpExchange exchange) throws IOException {
         String contentLength = exchange.getRequestHeaders().getFirst("Content-Length");
         if (contentLength != null && Integer.parseInt(contentLength) > MAX_BODY_BYTES) {
             throw new IOException("Request body too large");

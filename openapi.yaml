@@ -2,7 +2,7 @@ openapi: 3.0.3
 info:
   title: GridBase API
   version: 1.1.0
-  description: API for querying and changing data through Java JDBC, protected by GitHub OAuth sessions. All database endpoints require the HttpOnly session cookie. POST requests use application/json and mutations must originate from APP_URL. Connection profiles persist encrypted in SQLite and belong to the verified stable numeric GitHub account ID. All connection, health, query, and metadata operations are scoped to that account. Foreign connection IDs return 404 before opening JDBC. The optional X-GridBase-Account header binds a browser tab to its expected session account; a mismatch returns 409 before any operation and never selects an owner. Startup restores profiles as disconnected, without an implicit default. Requests without an ID use the first connection connected at runtime in that account; an unknown explicit ID never falls back. Supported databases are Spark Thrift/Hive, PostgreSQL, and MySQL.
+  description: API for querying and changing data through Java JDBC, protected by GitHub OAuth sessions. All database endpoints require the HttpOnly session cookie. POST requests use application/json and mutations must originate from APP_URL. Connection profiles persist encrypted in SQLite and belong to the verified stable numeric GitHub account ID. All connection, health, query, and metadata operations are scoped to that account. Foreign connection IDs return 404 before opening JDBC. The optional X-GridBase-Account header binds a browser tab to its expected session account; a mismatch returns 409 before any operation and never selects an owner. Startup restores profiles as disconnected, without an implicit default. Requests without an ID use the first connection connected at runtime in that account; an unknown explicit ID never falls back. Supported databases are Spark Thrift/Hive, PostgreSQL, and MySQL. Java backend persists safe per-account audit metadata in data/audit.sqlite with no SQL text or result rows. AUDIT_ADMIN_IDS configures stable numeric GitHub audit admins without granting connection access. Database operations require a durable pending audit intent; failure returns 503 before JDBC. A completion-write failure preserves the operation response and adds X-GridBase-Audit-Warning incomplete; do not blindly retry writes. Auth audit is best effort during storage failures and logout always revokes the session. No automatic audit deletion. Node legacy returns 501 for Activity APIs.
 servers:
   - url: http://127.0.0.1:4173
 security:
@@ -19,10 +19,15 @@ paths:
             application/json:
               schema:
                 type: object
-                required: [authenticated, configured, user]
+                required: [authenticated, configured, user, capabilities]
                 properties:
                   authenticated: { type: boolean }
                   configured: { type: boolean }
+                  capabilities:
+                    type: object
+                    required: [auditAdmin]
+                    properties:
+                      auditAdmin: { type: boolean, description: Server-derived audit access; never a connection ownership override }
                   user:
                     type: object
                     nullable: true
@@ -219,6 +224,9 @@ paths:
         '404': { description: Unknown connection ID; no fallback to another connection }
         '200':
           description: Query result
+          headers:
+            X-Request-ID: { $ref: '#/components/headers/RequestId' }
+            X-GridBase-Audit-Warning: { $ref: '#/components/headers/AuditWarning' }
           content:
             application/json:
               schema:
@@ -343,7 +351,113 @@ paths:
           description: Hive JDBC is not configured or the driver is unavailable
         '504':
           description: Database lookup timed out
+  /api/activity:
+    parameters:
+      - $ref: '#/components/parameters/ExpectedAccount'
+    get:
+      summary: List safe activity metadata for the verified account
+      description: Default scope mine. Only audit admins can use scope all or the userId filter. Anonymous login failures are visible only in admin all scope. Reading audit does not open JDBC or load connection profiles and creates no recursive audit event. Unknown or duplicate filters are rejected. Cursor is an exclusive insertion ID in descending order; new records do not shift subsequent pages.
+      parameters:
+        - { in: query, name: scope, schema: { type: string, enum: [mine, all], default: mine } }
+        - { in: query, name: userId, description: Admin only; requires scope all, schema: { type: string, pattern: '^[1-9][0-9]{0,19}$' } }
+        - { in: query, name: from, description: Inclusive start in ISO 8601 UTC, schema: { type: string, format: date-time } }
+        - { in: query, name: to, description: Inclusive end in ISO 8601 UTC, schema: { type: string, format: date-time } }
+        - { in: query, name: action, schema: { $ref: '#/components/schemas/ActivityAction' } }
+        - { in: query, name: outcome, schema: { type: string, enum: [pending, success, failure, denied] } }
+        - { in: query, name: connectionId, schema: { type: string, pattern: '^[a-zA-Z0-9_-]{1,100}$' } }
+        - { in: query, name: cursor, schema: { type: string, pattern: '^[1-9][0-9]{0,18}$' } }
+        - { in: query, name: limit, schema: { type: integer, minimum: 1, maximum: 100, default: 50 } }
+      responses:
+        '200':
+          description: Stable page of activity records; nullable nextCursor ends pagination
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [events, nextCursor, isAdmin]
+                properties:
+                  events: { type: array, items: { $ref: '#/components/schemas/ActivityEvent' } }
+                  nextCursor: { type: string, nullable: true }
+                  isAdmin: { type: boolean }
+        '400': { description: Invalid filter, cursor, or range }
+        '401': { description: Session missing or expired }
+        '403': { description: All-account scope or actor filter requires audit admin }
+        '409': { description: Expected account differs from session }
+        '503': { description: Audit storage unavailable }
+        '501': { description: Node legacy does not support audit }
+  /api/activity/users:
+    parameters:
+      - $ref: '#/components/parameters/ExpectedAccount'
+    get:
+      summary: List recorded actors for an audit administrator
+      responses:
+        '200':
+          description: Latest recorded username snapshot for each stable account ID; excludes anonymous actors
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [users]
+                properties:
+                  users:
+                    type: array
+                    items:
+                      type: object
+                      required: [id, login]
+                      properties:
+                        id: { type: string }
+                        login: { type: string }
+        '401': { description: Session missing or expired }
+        '403': { description: Audit admin required }
+        '409': { description: Expected account differs from session }
+        '503': { description: Audit storage unavailable }
+        '501': { description: Node legacy does not support audit }
+  /api/activity/exports:
+    parameters:
+      - $ref: '#/components/parameters/ExpectedAccount'
+    post:
+      summary: Record a browser export request for a successful query owned by the session
+      description: Server fixes actor and source browser. Reference survives connection deletion. Does not verify actual file contents or completion of a local download. Unknown, foreign, failed, or pending query references return 404. Clients should block download on failure or incomplete-audit warning.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [queryRequestId, format, rowCount]
+              properties:
+                queryRequestId: { type: string, format: uuid }
+                format: { type: string, enum: [csv, json] }
+                rowCount: { type: integer, format: int64, minimum: 0, description: Cannot exceed query returnedRows }
+      responses:
+        '200':
+          description: Export request recorded; not proof of file download
+          headers:
+            X-Request-ID: { $ref: '#/components/headers/RequestId' }
+            X-GridBase-Audit-Warning: { $ref: '#/components/headers/AuditWarning' }
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [ok, requestId]
+                properties:
+                  ok: { type: boolean }
+                  requestId: { type: string, format: uuid }
+        '400': { description: Invalid format or row count }
+        '401': { description: Session missing or expired }
+        '403': { description: Origin or content type rejected }
+        '404': { description: Successful owned query not found }
+        '409': { description: Expected account differs from session }
+        '503': { description: Audit storage unavailable }
+        '501': { description: Node legacy does not support audit }
 components:
+  headers:
+    RequestId:
+      description: Server-generated correlation ID; also returned in successful query JSON
+      schema: { type: string, format: uuid }
+    AuditWarning:
+      description: Present only when final audit persistence failed. Original operation response is retained; pending does not mean SQL was not executed.
+      schema: { type: string, enum: [incomplete] }
   securitySchemes:
     sessionCookie:
       type: apiKey
@@ -369,6 +483,33 @@ components:
       description: Nonblank identifier without control characters. Backticks are escaped by the server.
       schema: { type: string, minLength: 1, maxLength: 256 }
   schemas:
+    ActivityAction:
+      type: string
+      enum: [auth.start, auth.login, auth.logout, connection.list, connection.save, connection.test, connection.connect, connection.details, connection.disconnect, connection.delete, query.execute, metadata.databases, metadata.namespaces, metadata.tables, metadata.columns, result.export_requested]
+    ActivityEvent:
+      type: object
+      description: Safe append-only activity metadata, independent of current connection profiles. Pending means the outcome was not recorded, including process crashes or completion storage failures.
+      required: [id, requestId, userId, login, action, source, startedAt, outcome]
+      properties:
+        id: { type: string, description: Monotonic internal sequence serialized without JS integer precision loss }
+        requestId: { type: string, format: uuid }
+        userId: { type: string, nullable: true, description: Verified stable GitHub ID; null before identity verification }
+        login: { type: string, nullable: true, description: Username snapshot at time of event }
+        action: { $ref: '#/components/schemas/ActivityAction' }
+        source: { type: string, enum: [server, browser] }
+        connectionId: { type: string, nullable: true }
+        sqlOperation: { type: string, nullable: true }
+        sqlHash: { type: string, nullable: true, description: SHA-256 fingerprint of submitted SQL; no SQL text }
+        queryRequestId: { type: string, nullable: true }
+        exportFormat: { type: string, nullable: true, enum: [csv, json] }
+        returnedRows: { type: integer, format: int64, nullable: true, minimum: 0 }
+        affectedRows: { type: integer, format: int64, nullable: true, minimum: 0 }
+        startedAt: { type: string, format: date-time }
+        finishedAt: { type: string, format: date-time, nullable: true }
+        durationMs: { type: integer, format: int64, nullable: true, minimum: 0 }
+        httpStatus: { type: integer, nullable: true }
+        outcome: { type: string, enum: [pending, success, failure, denied] }
+        code: { type: string, nullable: true, description: Safe fixed AUTH code, HTTP status code, or OK; no raw exception }
     Connection:
       type: object
       required: [id, type, name, target, connected]
@@ -397,8 +538,9 @@ components:
           example: SELECT current_date;
     QueryResponse:
       type: object
-      required: [columns, rows, rowCount, durationMs]
+      required: [requestId, columns, rows, rowCount, durationMs]
       properties:
+        requestId: { type: string, format: uuid }
         columns:
           type: array
           items: { type: string }

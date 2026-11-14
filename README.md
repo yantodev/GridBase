@@ -61,8 +61,8 @@ Login memakai OAuth state, PKCE S256, dan cookie HttpOnly dengan SameSite=Lax (S
 pada HTTPS). Token GitHub hanya dipakai di server untuk membaca identitas publik lalu
 dibuang; izin repository tidak diminta. Sesi bertahan maksimal 8 jam dan disimpan dalam
 memori satu instance: restart server mengharuskan login ulang. Tombol **Keluar** mencabut
-sesi di server. Profil database, draft SQL, dan history tetap mengikuti penyimpanan
-workbench yang sudah ada; login GitHub tidak memisahkan data per pengguna.
+sesi di server. Profil database, draft SQL, cache koneksi, dan history dipisahkan
+berdasarkan ID akun GitHub yang terverifikasi.
 
 ## Workspace bergaya DataGrip
 
@@ -72,7 +72,7 @@ Tema dark dengan alur inti yang mengacu pada [query consoles dan query output Da
 - **SQL consoles:** tombol `+` membuat console. Klik tab untuk berpindah, klik dua kali atau tombol rename untuk mengganti nama, dan tutup melalui tombol pada tab. Draft maksimal 20 console dipulihkan setelah reload; hasil query tidak disimpan.
 - **Editor:** syntax highlighting, nomor baris, indentasi Tab/Shift+Tab (Escape melepas fokus ke toolbar), Format, serta Ctrl+Space untuk saran keyword dan objek yang telah dimuat. Ctrl/Cmd+Enter menjalankan seleksi atau statement di posisi caret. Satu request tetap menjalankan satu statement.
 - **Results / Output:** hasil terikat ke console asal, termasuk saat berpindah tab selama query berjalan. Klik heading kolom untuk sort, gunakan filter untuk mencari baris yang sudah dikembalikan, lalu unduh seluruh hasil filter melalui CSV/JSON. Klik nomor baris atau klik dua kali pada baris untuk detail vertikal.
-- **Layout:** rail kiri membuka Database atau History. Geser pembatas explorer/editor atau fokuskan pembatas lalu gunakan tombol panah, Home, dan End. Pada layar kecil explorer tampil sebagai overlay yang dapat ditutup dengan Escape.
+- **Layout:** rail kiri membuka Database, History, atau Activity. Geser pembatas explorer/editor atau fokuskan pembatas lalu gunakan tombol panah, Home, dan End. Pada layar kecil explorer tampil sebagai overlay yang dapat ditutup dengan Escape.
 
 Setiap data source menampilkan status konfigurasi dan error metadata beserta retry. Status di title bar serta dialect editor mengikuti koneksi tab SQL yang aktif.
 
@@ -119,6 +119,7 @@ GITHUB_CLIENT_ID=
 GITHUB_CLIENT_SECRET=
 GITHUB_ALLOWED_USERS=
 LEGACY_CONNECTION_OWNER_ID=
+AUDIT_ADMIN_IDS=
 ```
 
 Salin `.env.example` menjadi `.env` bila belum ada, lalu isi konfigurasi GitHub sesuai
@@ -159,6 +160,59 @@ tidak memperoleh akses. Pengelolaan multi koneksi memakai backend Java melalui `
 Jika belum ada koneksi, status menunjukkan `Not configured` dan tombol query dinonaktifkan.
 Username dan password tidak dikembalikan oleh endpoint health.
 
+## Audit aktivitas per akun
+
+Buka **Activity** pada rail kiri untuk menelusuri aktivitas yang tersimpan di server.
+Filter mendukung waktu, aktivitas, status, dan ID koneksi, dengan paginasi terbaru dahulu.
+Detail mencantumkan request ID untuk korelasi, waktu UTC, HTTP status, kode hasil, durasi,
+serta jumlah baris hasil/terdampak jika tersedia. Filter waktu diisi dalam waktu lokal
+browser dan dikirim sebagai UTC.
+
+- Setiap pengguna melihat aktivitasnya sendiri. Admin audit mendapat pilihan **Semua pengguna**
+  dan filter akun, termasuk login gagal sebelum identitas terverifikasi (actor kosong).
+- Tentukan admin melalui `AUDIT_ADMIN_IDS`, berupa **ID numerik GitHub tetap** dipisahkan koma.
+  Ambil field `id` dari `https://api.github.com/users/USERNAME`. Default kosong berarti tidak ada
+  admin lintas akun. Restart aplikasi setelah mengubah konfigurasi. Hak ini terpisah dari
+  `LEGACY_CONNECTION_OWNER_ID` dan tidak memberikan akses ke koneksi atau kredensial akun lain.
+- Server menetapkan actor dari sesi, bukan body/header pemilik atau username browser. Capability
+  `capabilities.auditAdmin` pada sesi hanya mengatur tampilan; backend tetap memeriksa akses.
+- Aktivitas yang dicatat: awal/login berhasil/gagal, logout, daftar/Save/Edit/Test/Connect/
+  Disconnect/Delete koneksi, query berhasil/gagal, metadata database/schema/tabel/kolom,
+  dan permintaan ekspor. Edit dicatat sebagai `connection.details` dan `connection.save`.
+  Health check, file statis, pemeriksaan sesi otomatis, membaca Activity, dan pengetikan draft
+  tidak menghasilkan catatan audit.
+- Query menyimpan jenis operasi dan fingerprint SHA-256, **tanpa teks SQL lengkap**. Audit
+  tidak menyimpan hasil baris, password, JDBC URL, token/cookie, kode/state OAuth, request body,
+  IP/user agent, atau pesan exception database mentah. Fingerprint dapat menghubungkan SQL identik.
+- CSV/JSON mengirim permintaan audit sebelum unduhan. Event bersumber `browser` dan mereferensikan
+  query berhasil milik pengguna, beserta format/jumlah baris yang diunduh. Referensi tetap valid
+  setelah koneksi dihapus. Ini mencatat permintaan ekspor, bukan bukti file selesai disimpan;
+  server tidak dapat membuktikan isi file lokal. Jika audit gagal, unduhan dibatalkan.
+
+Penyimpanan memakai **`data/audit.sqlite`**, SQLite terpisah dari profil terenkripsi dan key.
+File memakai izin privat; data bertahan setelah restart dan berada pada volume `gridbase-data`
+untuk Docker. Audit tidak mempunyai API edit/hapus dan tidak dihapus otomatis. Operator
+perlu memantau ukuran dan mengelola backup/arsip. Administrator sistem operasi tetap dapat
+mengubah file; penyimpanan ini bukan log yang kebal modifikasi.
+
+Intent `pending` disimpan sebelum operasi database. Jika gagal, server mengembalikan `503`
+sebelum membuka JDBC. Jika SQL selesai tetapi penyimpanan hasil audit gagal, respons SQL
+aslinya dipertahankan dengan header `X-GridBase-Audit-Warning: incomplete` dan peringatan
+persisten pada UI. Jangan langsung mengulangi SQL tulis; periksa status database. Catatan
+pending berarti hasil belum tercatat, termasuk jika proses terhenti. SQLite audit dan database
+JDBC eksternal tidak membentuk satu transaksi atomik. Logout tetap mencabut sesi ketika audit
+tidak tersedia; pencatatan autentikasi saat gangguan bersifat best effort.
+
+Backup audit secara terpisah memakai SQLite backup API/CLI, atau hentikan aplikasi lalu salin
+`data/audit.sqlite` dari volume. Jangan menyalin file database aktif tanpa mekanisme backup
+SQLite karena mode WAL dapat memiliki perubahan pada file pendamping. Simpan backup di lokasi
+privat. Backup profil tetap memerlukan pasangan `data/gridbase.sqlite` dan `data/credentials.key`;
+key itu tidak diperlukan untuk membaca backup audit. Pemulihan dilakukan saat aplikasi berhenti.
+Audit tetap dapat dibaca jika penyimpanan profil koneksi mengalami gangguan.
+
+Fitur audit tersedia pada backend Java (`npm start`). Backend Node legacy mengembalikan `501`
+untuk API Activity dan tidak memberikan pencatatan operasional ini.
+
 ## Menjalankan secara lokal
 
 Mode lokal membutuhkan instalasi Spark 3.5.6 yang memiliki Hive JDBC driver. PostgreSQL/MySQL
@@ -186,7 +240,7 @@ Image menyediakan Java runtime, distribusi Apache Spark 3.5.6 lengkap di
 
 Compose menjalankan aplikasi workbench. Spark Thrift Server yang menjadi target
 query tetap harus tersedia sebagai service eksternal dan ditambahkan melalui Add connection.
-Volume bernama `gridbase-data` dipasang pada `/app/data` sehingga profil dan kunci enkripsi
+Volume bernama `gridbase-data` dipasang pada `/app/data` sehingga profil, kunci enkripsi, dan audit
 bertahan saat container dibuat ulang. `docker compose down -v` menghapus volume beserta konfigurasi.
 
 ```bash
@@ -221,6 +275,7 @@ Konfigurasi Docker yang tersedia:
 - `PORT` — port host untuk workbench, default `4173`.
 - `QUERY_TIMEOUT_MS` — batas waktu query, default `30000`.
 - `DEFAULT_QUERY_LIMIT` — batas hasil jika LIMIT tidak ditulis atau bernilai NULL, default `50`. LIMIT eksplisit pada SQL mengambil prioritas.
+- `AUDIT_ADMIN_IDS` — ID numerik GitHub admin audit dipisahkan koma; default kosong.
 - `LEGACY_CONNECTION_OWNER_ID` — ID numerik akun tujuan migrasi profil lama; kosong membuat profil tanpa pemilik tetap tersembunyi.
 - `APP_URL`, `GITHUB_CLIENT_ID`, `GITHUB_CLIENT_SECRET`, `GITHUB_ALLOWED_USERS` — konfigurasi login GitHub seperti dijelaskan di atas. Callback OAuth App harus sesuai dengan `APP_URL`.
 
@@ -264,7 +319,12 @@ Kontrak API tersedia di [`openapi.yaml`](./openapi.yaml):
 - `GET /api/tables?connectionId=...&namespace=...` — daftar tabel pada namespace.
 - `GET /api/columns?connectionId=...&namespace=...&table=...` — daftar kolom, tipe, dan komentar.
 - `GET /api/namespaces` — alias deprecated untuk klien lama; gunakan `/api/databases`.
+- `GET /api/activity` — riwayat milik sendiri; filter `scope`, `userId` (admin), `from`, `to`, `action`, `outcome`, `connectionId`, `cursor`, `limit` (default 50, maksimal 100).
+- `GET /api/activity/users` — daftar actor untuk admin audit.
+- `POST /api/activity/exports` — body `{ "queryRequestId": "...", "format": "csv", "rowCount": 10 }`, format CSV/JSON dan jumlah baris dibatasi hasil query milik sesi.
 - `POST /api/query` — body `{ "connectionId": "...", "sql": "SELECT ..." }`.
+
+Respons query menyertakan `requestId` yang sama dengan header `X-Request-ID` dari server.
 
 Klien lama tanpa ID menggunakan koneksi pertama yang ditambahkan saat runtime.
 Jika koneksi tersebut di-disconnect, request tanpa ID tidak dialihkan ke koneksi lain;

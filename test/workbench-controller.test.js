@@ -4,7 +4,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const vm = require('node:vm');
 const C = require('../public/workbench-core');
-function setup({configured=true,offline=false,storage=new Map(),connections,accountId='1001'}={}) {
+function setup({configured=true,offline=false,storage=new Map(),connections,accountId='1001',auditAdmin=false}={}) {
   let sources=(connections || (configured ? [{id:'default',name:'Spark Thrift / Hive',type:'hive'}] : [])).map(item=>({connected:true,...item}));
   const settings=new Map(sources.map(item=>[item.id,{...item,host:'fixture',port:item.type==='mysql'?'3306':'5432',database:'app',username:'fixture',password:'saved-secret',jdbcUrl:item.type==='hive'?'jdbc:hive2://fixture/app;token=saved-token':`jdbc:${item.type}://fixture/app`}]));
   let document;
@@ -47,13 +47,16 @@ function setup({configured=true,offline=false,storage=new Map(),connections,acco
   nodes.get('#run-query').append(new Element('span'));
   const workspace=new Element();nodes.set('.workbench',workspace);
   document={body:new Element('body'),activeElement:null,querySelector(selector){const found=nodes.get(selector)||[...nodes.values()].flatMap(n=>n.querySelectorAll('*')).find(n=>selector==='#'+n.id);assert.ok(found,'Unknown DOM selector: '+selector);return found;},createElement:tag=>new Element(tag),createElementNS:(ns,tag)=>new Element(tag),addEventListener(){}};
-  let queryResponse=null, connectResponse=null, metadataResponse=null, detailsResponse=null;
+  let queryResponse=null, connectResponse=null, metadataResponse=null, detailsResponse=null, activityResponse=null, exportResponse=null, auditWarning=false;
   const requests=[];
-  const fixture=(count=23)=>({columns:['id','name'],rows:Array.from({length:count},(_,i)=>({id:String(i+1),name:i===0?null:'row '+(i+1)})),rowCount:count,durationMs:12,truncated:false,updateCount:null});
-  const context=vm.createContext({document,window:{WorkbenchCore:C,GridBaseSession:{user:{id:accountId,login:'fixture-user'}},localStorage:{getItem:key=>storage.get(key)||null,setItem:(key,value)=>storage.set(key,value)},matchMedia:()=>({matches:false,addEventListener(){}}),clearTimeout(){},setTimeout(){},addEventListener(){},confirm:()=>true},fetch:async(url,options)=>{
+  const fixture=(count=23)=>({requestId:'11111111-1111-4111-8111-111111111111',columns:['id','name'],rows:Array.from({length:count},(_,i)=>({id:String(i+1),name:i===0?null:'row '+(i+1)})),rowCount:count,durationMs:12,truncated:false,updateCount:null});
+  const context=vm.createContext({document,window:{WorkbenchCore:C,GridBaseSession:{user:{id:accountId,login:'fixture-user'},capabilities:{auditAdmin}},localStorage:{getItem:key=>storage.get(key)||null,setItem:(key,value)=>storage.set(key,value)},matchMedia:()=>({matches:false,addEventListener(){}}),clearTimeout(){},setTimeout(){},addEventListener(){},confirm:()=>true},fetch:async(url,options)=>{
     requests.push({url,options});if(offline)throw new Error('offline');
     let data;
-    if(url==='/api/health')data={configured,target:'fixture.example'};
+    if(url==='/api/activity/exports')data=exportResponse?await exportResponse:{ok:true,requestId:'export-id'};
+    else if(url==='/api/activity/users')data={users:[{id:'2002',login:'bob'}]};
+    else if(url.startsWith('/api/activity'))data=activityResponse?await activityResponse(url):{events:[],nextCursor:null,isAdmin:auditAdmin};
+    else if(url==='/api/health')data={configured,target:'fixture.example'};
     else if(url==='/api/connections' && options?.method!=='POST')data={connections:sources,defaultConnectionId:sources.find(item=>item.connected)?.id || null};
     else if(url==='/api/connections/connect' || url==='/api/connections' && options?.method==='POST') {
       if(connectResponse)await connectResponse;
@@ -73,10 +76,11 @@ function setup({configured=true,offline=false,storage=new Map(),connections,acco
     else if(url.startsWith('/api/columns'))data={columns:[{name:'id',type:'bigint',comment:''}]};
     else if(url==='/api/query')data=queryResponse?await queryResponse:fixture();
     else throw new Error('Unexpected URL '+url);
-    return {ok:true,json:async()=>data};
+    return {ok:true,headers:{get:name=>url==='/api/query'&&auditWarning&&name==='X-GridBase-Audit-Warning'?'incomplete':null},json:async()=>data};
   },Event:class {constructor(type){this.type=type;}},Blob,URL,URLSearchParams});
+  if(fs.existsSync('public/activity.js'))vm.runInContext(fs.readFileSync('public/activity.js','utf8'),context);
   vm.runInContext(fs.readFileSync('public/app.js','utf8'),context);
-  return {context,nodes,storage,requests,fixture,settings,setDetails:value=>{detailsResponse=value;},setQuery:value=>{queryResponse=value;},setConnect:value=>{connectResponse=value;},setMetadata:value=>{metadataResponse=value;},get:id=>nodes.get('#'+id),read:code=>vm.runInContext(code,context)};
+  return {context,nodes,storage,requests,fixture,settings,setActivity:value=>{activityResponse=value;},setExport:value=>{exportResponse=value;},setAuditWarning:value=>{auditWarning=value;},setDetails:value=>{detailsResponse=value;},setQuery:value=>{queryResponse=value;},setConnect:value=>{connectResponse=value;},setMetadata:value=>{metadataResponse=value;},get:id=>nodes.get('#'+id),read:code=>vm.runInContext(code,context)};
 }
 const flush=async()=>{for(let i=0;i<4;i++)await new Promise(setImmediate);};
 test('drafts, SQL history and cached connections are private to the verified account',async()=>{
@@ -336,4 +340,59 @@ test('old browser-only profiles request one-time credentials without silently cr
   assert.match(app.get('connection-form-status').textContent,/Isi password dan JDBC URL sekali lagi/);
   assert.equal(app.get('connection-password').value,'');assert.equal(app.get('connection-jdbc-url').value,'');
   assert.equal(app.get('run-query').disabled,true);
+});
+
+
+test('Activity opens own server history using safe text and preserves the SQL console',async()=>{
+  const app=setup();await flush();
+  assert.equal(app.requests.some(r=>r.url.startsWith('/api/activity')),false);
+  app.get('sql-editor').value='SELECT private_draft';await app.get('sql-editor').emit('input');
+  app.setActivity(async()=>({events:[{requestId:'request-1',startedAt:'2026-11-14T10:00:00Z',login:'<img src=x onerror=alert(1)>',action:'query.execute',sqlOperation:'SELECT',connectionId:'default',outcome:'pending',durationMs:null,returnedRows:null,affectedRows:null,code:null}],nextCursor:null,isAdmin:false}));
+  await app.get('activity-tool').click();await flush();
+  assert.equal(app.nodes.get('.workbench').hidden,true);assert.equal(app.get('activity-panel').hidden,false);
+  assert.equal(app.get('activity-admin-filters').hidden,true);
+  const body=app.get('activity-table').children[1],row=body.children[0];
+  assert.equal(row.children[1].textContent,'@<img src=x onerror=alert(1)>');
+  assert.equal(row.children[1].children.length,0);assert.match(row.children[4].textContent,/Pending/);
+  await row.children[6].children[0].click();assert.match(app.get('activity-detail').textContent,/request-1/);
+  await app.get('database-tool').click();
+  assert.equal(app.nodes.get('.workbench').hidden,false);assert.equal(app.get('sql-editor').value,'SELECT private_draft');
+});
+
+test('Activity admin filters paginate and ignore stale filter responses',async()=>{
+  const app=setup({auditAdmin:true});await flush();let resolve;
+  app.setActivity(url=>url.includes('cursor=7')?Promise.resolve({events:[],nextCursor:null}):new Promise(done=>{resolve=done;}));
+  const open=app.get('activity-tool').click();await flush();
+  assert.equal(app.get('activity-admin-filters').hidden,false);
+  app.setActivity(async()=>({events:[{requestId:'new',startedAt:'2026-11-14T10:00:00Z',userId:'2002',login:'bob',action:'connection.connect',outcome:'success'}],nextCursor:'7'}));
+  app.get('activity-scope').value='all';app.get('activity-user').value='2002';app.get('activity-action').value='connection.connect';
+  await app.get('activity-filters').emit('submit');
+  assert.match(app.requests.at(-1).url,/scope=all/);assert.match(app.requests.at(-1).url,/userId=2002/);
+  resolve({events:[{requestId:'stale',login:'stale-user',action:'auth.login'}],nextCursor:'99'});await open;await flush();
+  assert.match(app.get('activity-table').children[1].children[0].children[1].textContent,/bob/);
+  await app.get('activity-next').click();assert.match(app.requests.at(-1).url,/cursor=7/);
+});
+
+test('export waits for audit of its originating result and blocks downloads on audit failure',async()=>{
+  const app=setup();await flush();await app.context.runQuery('SELECT 1');let resolve;
+  app.setExport(new Promise(done=>{resolve=done;}));
+  const pending=app.context.exportResult('csv');await flush();
+  const request=app.requests.findLast(r=>r.url==='/api/activity/exports');assert.ok(request);
+  assert.deepEqual(JSON.parse(request.options.body),{queryRequestId:'11111111-1111-4111-8111-111111111111',format:'csv',rowCount:23});
+  assert.equal(app.context.document.body.children.filter(n=>n.tagName==='a').length,0);
+  app.context.addConsole('SELECT other','Other');resolve({ok:true});await pending;
+  assert.equal(app.context.document.body.children.filter(n=>n.tagName==='a').length,1);
+  assert.notEqual(app.context.document.body.children.find(n=>n.tagName==='a').download,'Other.csv');
+  await app.context.runQuery('SELECT 2');
+  app.setExport(Promise.resolve().then(()=>{throw new Error('audit unavailable');}));
+  await app.context.exportResult('json');
+  assert.equal(app.context.document.body.children.filter(n=>n.tagName==='a').length,1);
+  assert.match(app.get('toast').textContent,/ekspor|export/i);
+});
+
+test('a completion audit warning remains visible after successful SQL and later requests',async()=>{
+  const app=setup();await flush();app.setAuditWarning(true);await app.context.runQuery('UPDATE fixture SET id=2');
+  assert.equal(app.read('active().result.rows.length'),23);
+  assert.equal(app.get('audit-warning').hidden,false);assert.match(app.get('audit-warning').textContent,/telah selesai/);
+  app.setAuditWarning(false);await app.context.runQuery('SELECT 1');assert.equal(app.get('audit-warning').hidden,false);
 });

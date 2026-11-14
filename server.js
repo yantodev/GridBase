@@ -387,6 +387,9 @@ function createServer(options = {}) {
   return http.createServer(async (request, response) => {
     const url = new URL(request.url, "http://localhost");
     if (await auth(request, response, url)) return;
+    if (url.pathname === '/api/activity' || url.pathname.startsWith('/api/activity/')) {
+      sendJson(response, 501, {error: 'Audit aktivitas membutuhkan backend Java JDBC. Jalankan npm start.'}); return;
+    }
     const ownsConnection = Boolean(legacyOwner && request.user?.id === legacyOwner);
     const privateHealth = ownsConnection ? getHealth() : {status: 'degraded', configured: false, readOnly: false, target: null};
     if (request.method === "GET" && url.pathname === "/api/connections") {

@@ -47,7 +47,8 @@
       if (user && user.id !== session.user.id) { accountChanged(); return; }
       if (!user) {
         user = Object.freeze({id: session.user.id, login: session.user.login});
-        window.GridBaseSession = Object.freeze({user});
+        const capabilities = Object.freeze({auditAdmin: session.capabilities?.auditAdmin === true});
+        window.GridBaseSession = Object.freeze({user,capabilities});
         const script = document.createElement('script');
         script.src = '/app.js';
         document.body.append(script);

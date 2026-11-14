@@ -6,6 +6,16 @@ public final class JsonUtil {
     private JsonUtil() {
     }
 
+    public static long nonnegativeLongField(String json, String field) {
+        int start = fieldValueStart(json, field), end = start;
+        if (start < 0) throw new IllegalArgumentException("Missing JSON field");
+        while (end < json.length() && json.charAt(end) >= '0' && json.charAt(end) <= '9') end++;
+        if (end < json.length() && !Character.isWhitespace(json.charAt(end)) && ",}]".indexOf(json.charAt(end)) < 0) throw new IllegalArgumentException("Invalid integer");
+        String number = json.substring(start, end);
+        if (!number.matches("0|[1-9][0-9]{0,18}")) throw new IllegalArgumentException("Invalid row count");
+        try { return Long.parseLong(number); } catch (NumberFormatException invalid) { throw new IllegalArgumentException("Invalid row count"); }
+    }
+
     public static String positiveIntegerField(String json, String field) {
         int start = fieldValueStart(json, field), end = start;
         if (start < 0) throw new IllegalArgumentException("Missing JSON field");

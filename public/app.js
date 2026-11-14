@@ -84,11 +84,18 @@ function restoreFocus(root, work) {
 async function api(url, options = {}) {
   let response;
   try { response = await fetch(url, options); } catch { throw new Error('Server tidak dapat dijangkau. Periksa server lalu coba kembali.'); }
+  const auditIncomplete = response.headers?.get('X-GridBase-Audit-Warning') === 'incomplete';
+  if (auditIncomplete) {
+    $('#audit-warning').hidden = false;
+    $('#audit-warning').textContent = 'Respons operasi telah selesai, tetapi pencatatan audit belum lengkap. Periksa Activity dan status database sebelum mengulang operasi.';
+  }
   let data;
   try { data = await response.json(); } catch { throw new Error('Respons server tidak valid. Periksa log server lalu coba kembali.'); }
   if (!response.ok) throw new Error(data.error || 'Request gagal. Coba kembali.');
+  if (auditIncomplete) data.auditIncomplete = true;
   return data;
 }
+const activity = window.GridBaseActivity.mount({api,user:window.GridBaseSession.user,capabilities:window.GridBaseSession.capabilities});
 function connectionType() { return $('#database-type').value; }
 function updateConnectionType() {
   const type = connectionType(), hive = type === 'hive';
@@ -433,19 +440,25 @@ async function checkConnection() {
 }
 function metadataNote(text, error = false) { return element('p', 'pane-note metadata-note' + (error ? ' is-error' : ''), text); }
 function setSidebar(tool = state.tool, open = true) {
+  const enteringActivity = tool === 'activity' && state.tool !== 'activity';
   state.tool = tool; state.sidebarOpen = open;
   $('#app').classList.toggle('sidebar-hidden', !open);
   $('#database-view').hidden = tool !== 'database'; $('#history-view').hidden = tool !== 'history';
-  $('#sidebar-heading').textContent = tool === 'database' ? 'Database' : 'Query history';
+  $('#activity-view').hidden = tool !== 'activity';
+  $('.workbench').hidden = tool === 'activity';
+  $('#activity-panel').hidden = tool !== 'activity';
+  $('#sidebar-heading').textContent = tool === 'database' ? 'Database' : tool === 'history' ? 'Query history' : 'Activity';
   $('#sidebar').setAttribute('aria-label', $('#sidebar-heading').textContent);
   $('#refresh-metadata').hidden = tool !== 'database';
-  for (const name of ['database', 'history']) {
+  for (const name of ['database', 'history', 'activity']) {
     $('#' + name + '-tool').classList.toggle('is-active', open && tool === name);
     $('#' + name + '-tool').setAttribute('aria-expanded', String(open && tool === name));
   }
   const mobile = window.matchMedia('(max-width: 700px)').matches;
   $('#sidebar-backdrop').hidden = !open || !mobile;
   $('.workbench').inert = open && mobile;
+  $('#activity-panel').inert = open && mobile;
+  if (enteringActivity) return activity.show();
 }
 async function refreshMetadata(id = state.selectedConnectionId) {
   const source = state.connections.get(id); if (!source?.connected) return;
@@ -663,14 +676,19 @@ async function runQuery(explicitSql) {
     if(state.activeId===tab.id){renderResults();updateConnectionUI();}
   }
 }
-function exportResult(format) {
-  const tab=active();if(!tab.result)return;
-  const rows=C.viewRows(tab.result,tab.filter,tab.sort).map(item=>item.row);
-  const body=format==='csv'?C.toCsv(tab.result.columns,rows):JSON.stringify(rows,null,2);
-  const url=URL.createObjectURL(new Blob([body],{type:format==='csv'?'text/csv;charset=utf-8':'application/json'}));
-  const link=element('a');link.href=url;link.download=tab.name.replace(/[^a-zA-Z0-9_-]/g,'_')+'.'+format;document.body.append(link);link.click();link.remove();window.setTimeout(()=>URL.revokeObjectURL(url),1000);
-  setToast(`${rows.length} rows exported as ${format.toUpperCase()}.`);
+async function exportResult(format) {
+  const tab=active(), result=tab.result;if(!result)return;
+  const name=tab.name;
+  const rows=C.viewRows(result,tab.filter,tab.sort).map(item=>item.row);
+  const body=format==='csv'?C.toCsv(result.columns,rows):JSON.stringify(rows,null,2);
+  try {
+    await activity.exportRequested(result.requestId,format,rows.length);
+    const url=URL.createObjectURL(new Blob([body],{type:format==='csv'?'text/csv;charset=utf-8':'application/json'}));
+    const link=element('a');link.href=url;link.download=name.replace(/[^a-zA-Z0-9_-]/g,'_')+'.'+format;document.body.append(link);link.click();link.remove();window.setTimeout(()=>URL.revokeObjectURL(url),1000);
+    setToast(`${rows.length} rows exported as ${format.toUpperCase()}.`);
+  } catch(error) { setToast('Ekspor dibatalkan: '+error.message); }
 }
+
 function replaceEditor(start,end,text,selectionStart=start+text.length,selectionEnd=selectionStart) {
   if(editor.value.length-(end-start)+text.length>20000){setToast('Edit exceeds the 20,000-character SQL limit. Shorten the console or use a new one.');return false;}
   editor.setRangeText(text,start,end,'end');editor.setSelectionRange(selectionStart,selectionEnd);editor.dispatchEvent(new Event('input'));editor.focus();return true;
@@ -742,7 +760,7 @@ $('#format-query').addEventListener('click',()=>{
 $('#close-completion').addEventListener('click',()=>{$('#completion-panel').hidden=true;editor.focus();});
 $('#completion-select').addEventListener('dblclick',insertCompletion);
 $('#completion-select').addEventListener('keydown',event=>{if(event.key==='Enter'){event.preventDefault();insertCompletion();}if(event.key==='Escape'){event.preventDefault();$('#completion-panel').hidden=true;editor.focus();}});
-for(const tool of ['database','history'])$('#'+tool+'-tool').addEventListener('click',()=>setSidebar(tool,!(state.sidebarOpen&&state.tool===tool)));
+for(const tool of ['database','history','activity'])$('#'+tool+'-tool').addEventListener('click',()=>setSidebar(tool,!(state.sidebarOpen&&state.tool===tool)));
 $('#hide-sidebar').addEventListener('click',()=>{setSidebar(state.tool,false);$('#'+state.tool+'-tool').focus();});
 $('#sidebar-backdrop').addEventListener('click',()=>{setSidebar(state.tool,false);$('#'+state.tool+'-tool').focus();});
 $('#object-filter').addEventListener('input',renderExplorer);
