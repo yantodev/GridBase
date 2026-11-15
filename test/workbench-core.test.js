@@ -10,6 +10,50 @@ test('runs only selected SQL or the statement at the caret, respecting quoted de
   assert.equal(C.executionSql('-- only a comment', 2, 2), '');
   assert.equal(C.statementRanges("SELECT /* ; */ 'a\\\';b'; SELECT 2;").length, 2);
 });
+test('mutation detection handles comments, CTEs and multiple selected statements', () => {
+  for(const [sql,want] of [
+    ['update fixture set id=2',['UPDATE']],
+    ['-- DELETE is a comment\n/* UPDATE */ DeLeTe FROM fixture',['DELETE']],
+    ["SELECT 'DELETE', 'UPDATE', `update`, \"delete\" FROM fixture",[]],
+    ['SELECT * FROM fixture FOR UPDATE',[]],
+    ['SELECT * FROM fixture FOR NO KEY UPDATE',[]],
+    ['WITH chosen AS (SELECT 1) UPDATE fixture SET id=2',['UPDATE']],
+    ['WITH RECURSIVE chosen(id) AS (SELECT 1) DELETE FROM fixture',['DELETE']],
+    ['WITH changed AS (UPDATE fixture SET id=2 RETURNING *) SELECT * FROM changed',['UPDATE']],
+    ['WITH changed AS NOT MATERIALIZED (DELETE FROM fixture RETURNING *) SELECT * FROM changed',['DELETE']],
+    ['WITH a AS (SELECT 1), b AS (WITH c AS (DELETE FROM fixture RETURNING *) SELECT * FROM c) UPDATE fixture SET id=2',['DELETE','UPDATE']],
+    ["WITH a AS (SELECT 'UPDATE') SELECT * FROM a FOR UPDATE",[]],
+    ['SELECT 1; UPDATE fixture SET id=2; DELETE FROM fixture; UPDATE fixture SET id=3;',['UPDATE','DELETE']],
+    ['EXPLAIN UPDATE fixture SET id=2',[]],
+    ['EXPLAIN ANALYZE DELETE FROM fixture',['DELETE']],
+    ['EXPLAIN (ANALYZE false) DELETE FROM fixture',[]],
+    ['EXPLAIN (ANALYZE true, BUFFERS) UPDATE fixture SET id=2',['UPDATE']]
+  ]) assert.deepEqual(C.mutationOperations(sql),want,sql);
+});
+
+test('dollar-quoted literals cannot hide a following mutation or split a statement', () => {
+  const sql='WITH c AS (SELECT $$($$) DELETE FROM fixture;';
+  assert.deepEqual(C.mutationOperations(sql),['DELETE']);
+  assert.deepEqual(C.mutationOperations('WITH c AS (SELECT $tag$(; UPDATE$tag$) UPDATE fixture SET id=2;'),['UPDATE']);
+  assert.deepEqual(C.mutationOperations('SELECT $$DELETE FROM fixture; UPDATE fixture SET id=2$$;'),[]);
+  assert.equal(C.executionSql('SELECT $tag$a;b$tag$; DELETE FROM fixture;',10,10),'SELECT $tag$a;b$tag$;');
+});
+
+test('recursive CTE SEARCH and CYCLE clauses cannot hide main or later CTE mutations', () => {
+  for(const [sql,want] of [
+    ['WITH RECURSIVE c(id) AS (SELECT 1) SEARCH DEPTH FIRST BY id SET ordering DELETE FROM fixture WHERE id IN (SELECT id FROM c);',['DELETE']],
+    ['WITH RECURSIVE c(id) AS (SELECT 1) CYCLE id SET is_cycle USING path UPDATE fixture SET id=2;',['UPDATE']],
+    ["WITH RECURSIVE c(id) AS (SELECT 1) SEARCH BREADTH FIRST BY id SET ordering CYCLE id SET is_cycle TO 'Y' DEFAULT 'N' USING path, d AS (DELETE FROM fixture RETURNING *) SELECT * FROM d;",['DELETE']],
+    ['WITH RECURSIVE c(id) AS (SELECT 1) SEARCH DEPTH FIRST BY id SET ordering CYCLE id SET is_cycle USING path SELECT * FROM c FOR UPDATE;',[]]
+  ]) assert.deepEqual(C.mutationOperations(sql),want,sql);
+});
+
+test('EXPLAIN ANALYSE confirms executing mutations but not disabled analysis', () => {
+  assert.deepEqual(C.mutationOperations('EXPLAIN ANALYSE DELETE FROM fixture;'),['DELETE']);
+  assert.deepEqual(C.mutationOperations('EXPLAIN (ANALYSE, BUFFERS) UPDATE fixture SET id=2;'),['UPDATE']);
+  assert.deepEqual(C.mutationOperations('EXPLAIN (ANALYSE false) DELETE FROM fixture;'),[]);
+});
+
 test('formatting and highlighting preserve literals, comments, and untrusted values', () => {
   const sql = "select 'from  x; <script>', `select` from x where a = 'it''s ok' -- select  x\nlimit 10;";
   const formatted = C.formatSql(sql);

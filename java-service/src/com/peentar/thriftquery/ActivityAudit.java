@@ -47,6 +47,7 @@ final class ActivityAudit {
     static void sql(HttpExchange exchange, String sql) {
         Exchange context = (Exchange) exchange;
         if (context.event == null) return;
+        context.event.sqlText = sql;
         try {
             context.event.sqlHash = HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(sql.getBytes(StandardCharsets.UTF_8)));
         } catch (java.security.NoSuchAlgorithmException impossible) { throw new IllegalStateException(impossible); }

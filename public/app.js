@@ -659,6 +659,10 @@ async function runQuery(explicitSql) {
   rememberEditor();
   const sql = typeof explicitSql === 'string' ? explicitSql : C.executionSql(editor.value,editor.selectionStart,editor.selectionEnd);
   if(!sql.trim()) { setToast('Write a SQL statement before executing.'); editor.focus(); return; }
+  const mutations = C.mutationOperations(sql);
+  if(mutations.length && !window.confirm(`Jalankan ${mutations.join(' / ')} pada koneksi “${tabConnection().name}”?\n\nQuery ini akan mengubah atau menghapus data. Pastikan kondisi WHERE sudah sesuai.\n\n${sql}`)) {
+    setToast('Eksekusi query dibatalkan.'); editor.focus(); return;
+  }
   tab.running=true; tab.error=''; tab.result=null; tab.output='Executing…\n\n'+sql; tab.dock='results'; tab.page=1; tab.filter=''; tab.sort=null;
   renderTabs(); renderResults(); updateRunButton();
   try {

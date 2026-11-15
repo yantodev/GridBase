@@ -12,6 +12,10 @@
       let kind='symbol';
       if (sql.startsWith('--',i)) { kind='comment'; i=sql.indexOf('\n',i); if(i<0)i=sql.length; }
       else if (sql.startsWith('/*',i)) { kind='comment'; const end=sql.indexOf('*/',i+2); i=end<0?sql.length:end+2; }
+      else if (char==='$' && /^\$(?:[a-zA-Z_][\w]*)?\$/.test(sql.slice(i))) {
+        kind='string'; const delimiter=sql.slice(i).match(/^\$(?:[a-zA-Z_][\w]*)?\$/)[0];
+        const end=sql.indexOf(delimiter,i+delimiter.length);i=end<0?sql.length:end+delimiter.length;
+      }
       else if (char === "'" || char === '"' || char === '`') {
         kind=char==='`'?'identifier':'string'; i++;
         while(i<sql.length) {
@@ -42,6 +46,62 @@
     const ranges=statementRanges(sql);
     const current=ranges.find(r=>start>=r.start && start<r.end) || ranges.find(r=>r.start>=start) || ranges.at(-1);
     return current?sql.slice(current.start,current.end).trim():'';
+  }
+  function mutationOperations(sql) {
+    const code=tokens(sql).filter(t=>t.kind!=='space' && t.kind!=='comment');
+    const word=i=>code[i]?.kind==='word'?code[i].text.toUpperCase():'';
+    const pairs=new Map(),stack=[],operations=new Set();
+    code.forEach((t,i)=>{
+      if(t.kind==='symbol' && t.text==='(')stack.push(i);
+      else if(t.kind==='symbol' && t.text===')' && stack.length)pairs.set(stack.pop(),i);
+    });
+    function scan(start,end) {
+      const command=word(start);
+      if(command==='EXPLAIN') {
+        let i=start+1,analyze=false;
+        if(pairs.has(i)) {
+          const close=pairs.get(i);
+          for(let j=i+1;j<close;j++)if(/^(ANALYZE|ANALYSE)$/.test(word(j)))analyze=!/^(FALSE|OFF|0)$/i.test(code[j+1]?.text || '');
+          i=close+1;
+        } else {
+          while(i<end && !/^(SELECT|WITH|INSERT|UPDATE|DELETE|MERGE)$/.test(word(i))) {
+            if(/^(ANALYZE|ANALYSE)$/.test(word(i)))analyze=true;
+            i++;
+          }
+        }
+        if(analyze)scan(i,end);
+        return;
+      }
+      if(command==='UPDATE' || command==='DELETE')operations.add(command);
+      if(command!=='WITH')return;
+      let i=start+1;
+      if(word(i)==='RECURSIVE')i++;
+      while(i<end) {
+        i++; // CTE name (possibly quoted).
+        if(pairs.has(i))i=pairs.get(i)+1; // Optional column list.
+        if(word(i)!=='AS')return;
+        i++;
+        if(word(i)==='NOT')i++;
+        if(word(i)==='MATERIALIZED')i++;
+        if(!pairs.has(i))return;
+        const close=pairs.get(i);scan(i+1,close);i=close+1;
+        // Recursive CTE decorations precede the next CTE or main command.
+        if(word(i)==='SEARCH') {
+          while(i<end && word(i)!=='SET')i++;
+          i+=2; // SET generated_order_column.
+        }
+        if(word(i)==='CYCLE') {
+          while(i<end && word(i)!=='USING')i++;
+          i+=2; // USING generated_path_column.
+        }
+        if(code[i]?.text!==',')break;
+        i++;
+      }
+      scan(i,end);
+    }
+    let start=0;
+    for(let i=0;i<=code.length;i++)if(i===code.length || code[i].kind==='symbol' && code[i].text===';') {scan(start,i);start=i+1;}
+    return [...operations];
   }
   function escapeHtml(value) {return String(value).replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
   function highlightSql(sql) {
@@ -121,5 +181,5 @@
     const cell=v=>{const s=v==null?'':String(v);return /[",\r\n]/.test(s)?'"'+s.replace(/"/g,'""')+'"':s;};
     return [columns,...rows.map(r=>columns.map(c=>r[c]))].map(r=>r.map(cell).join(',')).join('\r\n');
   }
-  return {tokens,statementRanges,executionSql,escapeHtml,highlightSql,formatSql,quoteIdentifier,qualifiedTable,tableSql,newTab,restoreDrafts,serializeDrafts,viewRows,toCsv,KEYWORDS};
+  return {tokens,statementRanges,executionSql,mutationOperations,escapeHtml,highlightSql,formatSql,quoteIdentifier,qualifiedTable,tableSql,newTab,restoreDrafts,serializeDrafts,viewRows,toCsv,KEYWORDS};
 });

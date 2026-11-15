@@ -71,6 +71,7 @@ Tema dark dengan alur inti yang mengacu pada [query consoles dan query output Da
 - **Database explorer:** buka schema, klik nama tabel untuk membuka console dengan `SELECT ... LIMIT 50`, dan buka panah di samping tabel untuk melihat kolom beserta tipenya. Tombol refresh memuat ulang metadata. Filter mencari objek yang sudah dimuat.
 - **SQL consoles:** tombol `+` membuat console. Klik tab untuk berpindah, klik dua kali atau tombol rename untuk mengganti nama, dan tutup melalui tombol pada tab. Draft maksimal 20 console dipulihkan setelah reload; hasil query tidak disimpan.
 - **Editor:** syntax highlighting, nomor baris, indentasi Tab/Shift+Tab (Escape melepas fokus ke toolbar), Format, serta Ctrl+Space untuk saran keyword dan objek yang telah dimuat. Ctrl/Cmd+Enter menjalankan seleksi atau statement di posisi caret. Satu request tetap menjalankan satu statement.
+  Query UPDATE/DELETE meminta konfirmasi sebelum dikirim, termasuk melalui shortcut dan CTE (`WITH`). Pop-up menampilkan koneksi dan SQL yang dipilih; Cancel membatalkan tanpa menghapus hasil sebelumnya. Ini pengaman UI, bukan pembatas akses API atau transaksi/rollback database.
 - **Results / Output:** hasil terikat ke console asal, termasuk saat berpindah tab selama query berjalan. Klik heading kolom untuk sort, gunakan filter untuk mencari baris yang sudah dikembalikan, lalu unduh seluruh hasil filter melalui CSV/JSON. Klik nomor baris atau klik dua kali pada baris untuk detail vertikal.
 - **Layout:** rail kiri membuka Database, History, atau Activity. Geser pembatas explorer/editor atau fokuskan pembatas lalu gunakan tombol panah, Home, dan End. Pada layar kecil explorer tampil sebagai overlay yang dapat ditutup dengan Escape.
 
@@ -165,7 +166,8 @@ Username dan password tidak dikembalikan oleh endpoint health.
 Buka **Activity** pada rail kiri untuk menelusuri aktivitas yang tersimpan di server.
 Filter mendukung waktu, aktivitas, status, dan ID koneksi, dengan paginasi terbaru dahulu.
 Detail mencantumkan request ID untuk korelasi, waktu UTC, HTTP status, kode hasil, durasi,
-serta jumlah baris hasil/terdampak jika tersedia. Filter waktu diisi dalam waktu lokal
+serta jumlah baris hasil/terdampak jika tersedia. Untuk aktivitas query, Detail juga menampilkan
+teks SQL yang dikirim. Filter waktu diisi dalam waktu lokal
 browser dan dikirim sebagai UTC.
 
 - Setiap pengguna melihat aktivitasnya sendiri. Admin audit mendapat pilihan **Semua pengguna**
@@ -181,9 +183,15 @@ browser dan dikirim sebagai UTC.
   dan permintaan ekspor. Edit dicatat sebagai `connection.details` dan `connection.save`.
   Health check, file statis, pemeriksaan sesi otomatis, membaca Activity, dan pengetikan draft
   tidak menghasilkan catatan audit.
-- Query menyimpan jenis operasi dan fingerprint SHA-256, **tanpa teks SQL lengkap**. Audit
-  tidak menyimpan hasil baris, password, JDBC URL, token/cookie, kode/state OAuth, request body,
-  IP/user agent, atau pesan exception database mentah. Fingerprint dapat menghubungkan SQL identik.
+- Aktivitas `query.execute` menyimpan **teks SQL yang dikirim** (`sqlText`), jenis operasi, dan
+  fingerprint SHA-256, termasuk query gagal/ditolak setelah SQL terbaca. Teks dicatat sebelum
+  JDBC dijalankan; status pending bukan bukti eksekusi berhasil. Teks hanya dapat dibaca pemilik
+  aktivitas atau admin audit. Migrasi SQLite otomatis mempertahankan riwayat lama; catatan lama
+  dan aktivitas non-query memiliki `sqlText: null` (SQL lama tidak dapat direkonstruksi).
+- **Literal, komentar, atau data sensitif yang ditulis dalam SQL ikut tersimpan sebagai teks biasa
+  di audit dan backup-nya.** Hindari menaruh rahasia dalam query dan batasi akses file/backup.
+  Audit tidak menyalin hasil baris, kredensial profil koneksi, JDBC URL profil, token/cookie sesi,
+  kode/state OAuth, request body lengkap, IP/user agent, atau exception database mentah.
 - CSV/JSON mengirim permintaan audit sebelum unduhan. Event bersumber `browser` dan mereferensikan
   query berhasil milik pengguna, beserta format/jumlah baris yang diunduh. Referensi tetap valid
   setelah koneksi dihapus. Ini mencatat permintaan ekspor, bukan bukti file selesai disimpan;

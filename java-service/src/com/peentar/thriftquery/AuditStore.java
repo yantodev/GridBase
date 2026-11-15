@@ -14,7 +14,7 @@ import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 
-/** Safe operational metadata only. No request bodies, SQL text, credentials, or results. */
+/** Operational metadata and submitted query SQL. No connection credentials or results. */
 final class AuditStore {
     static final Set<String> ACTIONS = Set.of("auth.start", "auth.login", "auth.logout", "connection.list", "connection.save", "connection.test", "connection.connect", "connection.details", "connection.disconnect", "connection.delete", "query.execute", "metadata.databases", "metadata.namespaces", "metadata.tables", "metadata.columns", "result.export_requested");
     static final Set<String> OPERATIONS = Set.of("SELECT", "WITH", "SHOW", "DESCRIBE", "DESC", "EXPLAIN", "CREATE", "INSERT", "UPDATE", "DELETE", "MERGE", "ALTER", "DROP", "TRUNCATE");
@@ -35,13 +35,22 @@ final class AuditStore {
                 }
                 restrict(database, "rw-------");
                 try (var db = open(); var sql = db.createStatement()) {
-                    try (var version = sql.executeQuery("PRAGMA user_version")) { if (version.next() && (version.getInt(1) < 0 || version.getInt(1) > 1)) throw new Unavailable(); }
+                    int schema;
+                    try (var version = sql.executeQuery("PRAGMA user_version")) { schema = version.next() ? version.getInt(1) : -1; }
+                    if (schema < 0 || schema > 2) throw new Unavailable();
                     sql.execute("PRAGMA journal_mode=WAL");
-                    sql.executeUpdate("CREATE TABLE IF NOT EXISTS audit_events (id INTEGER PRIMARY KEY AUTOINCREMENT, request_id TEXT UNIQUE NOT NULL, user_id TEXT, login TEXT, action TEXT NOT NULL, source TEXT NOT NULL, connection_id TEXT, sql_operation TEXT, sql_hash TEXT, query_request_id TEXT, export_format TEXT, returned_rows INTEGER, affected_rows INTEGER, started_at INTEGER NOT NULL, finished_at INTEGER, duration_ms INTEGER, http_status INTEGER, outcome TEXT NOT NULL, code TEXT)");
+                    db.setAutoCommit(false);
+                    sql.executeUpdate("CREATE TABLE IF NOT EXISTS audit_events (id INTEGER PRIMARY KEY AUTOINCREMENT, request_id TEXT UNIQUE NOT NULL, user_id TEXT, login TEXT, action TEXT NOT NULL, source TEXT NOT NULL, connection_id TEXT, sql_operation TEXT, sql_hash TEXT, query_request_id TEXT, export_format TEXT, returned_rows INTEGER, affected_rows INTEGER, started_at INTEGER NOT NULL, finished_at INTEGER, duration_ms INTEGER, http_status INTEGER, outcome TEXT NOT NULL, code TEXT, sql_text TEXT)");
+                    if (schema < 2) {
+                        boolean hasSqlText = false;
+                        try (var columns = sql.executeQuery("PRAGMA table_info(audit_events)")) { while (columns.next()) if (columns.getString("name").equals("sql_text")) hasSqlText = true; }
+                        if (!hasSqlText) sql.executeUpdate("ALTER TABLE audit_events ADD COLUMN sql_text TEXT");
+                    }
                     sql.executeUpdate("CREATE INDEX IF NOT EXISTS audit_owner_order ON audit_events(user_id,id DESC)");
                     sql.executeUpdate("CREATE INDEX IF NOT EXISTS audit_started ON audit_events(started_at)");
                     sql.executeUpdate("CREATE INDEX IF NOT EXISTS audit_action_order ON audit_events(action,id DESC)");
-                    sql.executeUpdate("PRAGMA user_version=1");
+                    sql.executeUpdate("PRAGMA user_version=2");
+                    db.commit();
                 }
             } catch (Exception error) { throw new Unavailable(); }
         }
@@ -50,17 +59,17 @@ final class AuditStore {
     synchronized void begin(Event event) {
         validate(event);
         if (!event.outcome.equals("pending") || event.finishedAt != null) throw new IllegalArgumentException("Invalid pending audit");
-        try (var db = open(); var sql = db.prepareStatement("INSERT INTO audit_events(request_id,user_id,login,action,source,connection_id,sql_operation,sql_hash,query_request_id,export_format,returned_rows,affected_rows,started_at,outcome) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)")) {
+        try (var db = open(); var sql = db.prepareStatement("INSERT INTO audit_events(request_id,user_id,login,action,source,connection_id,sql_operation,sql_hash,query_request_id,export_format,returned_rows,affected_rows,sql_text,started_at,outcome) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)")) {
             sql.setString(1, event.requestId); sql.setString(2, event.userId); sql.setString(3, event.login); sql.setString(4, event.action); sql.setString(5, event.source);
-            bindMetadata(sql, 6, event); sql.setLong(13, event.startedAt); sql.setString(14, "pending");
+            bindMetadata(sql, 6, event); sql.setLong(14, event.startedAt); sql.setString(15, "pending");
             sql.executeUpdate();
         } catch (Exception error) { throw new Unavailable(); }
     }
 
     synchronized void annotate(Event event) {
         validate(event);
-        try (var db = open(); var sql = db.prepareStatement("UPDATE audit_events SET connection_id=?,sql_operation=?,sql_hash=?,query_request_id=?,export_format=?,returned_rows=?,affected_rows=? WHERE request_id=? AND outcome='pending'")) {
-            bindMetadata(sql, 1, event); sql.setString(8, event.requestId);
+        try (var db = open(); var sql = db.prepareStatement("UPDATE audit_events SET connection_id=?,sql_operation=?,sql_hash=?,query_request_id=?,export_format=?,returned_rows=?,affected_rows=?,sql_text=? WHERE request_id=? AND outcome='pending'")) {
+            bindMetadata(sql, 1, event); sql.setString(9, event.requestId);
             if (sql.executeUpdate() != 1) throw new Unavailable();
         } catch (Exception error) { throw new Unavailable(); }
     }
@@ -68,8 +77,8 @@ final class AuditStore {
     synchronized void finish(Event event) {
         validate(event);
         if (event.finishedAt == null || event.outcome.equals("pending") || event.durationMs == null || event.durationMs < 0 || event.httpStatus == null || event.httpStatus < 100 || event.httpStatus > 599) throw new IllegalArgumentException("Invalid finished audit");
-        try (var db = open(); var sql = db.prepareStatement("UPDATE audit_events SET connection_id=?,sql_operation=?,sql_hash=?,query_request_id=?,export_format=?,returned_rows=?,affected_rows=?,user_id=?,login=?,finished_at=?,duration_ms=?,http_status=?,outcome=?,code=? WHERE request_id=? AND outcome='pending'")) {
-            bindMetadata(sql, 1, event); sql.setString(8, event.userId); sql.setString(9, event.login); sql.setLong(10, event.finishedAt); sql.setLong(11, event.durationMs); sql.setInt(12, event.httpStatus); sql.setString(13, event.outcome); sql.setString(14, event.code); sql.setString(15, event.requestId);
+        try (var db = open(); var sql = db.prepareStatement("UPDATE audit_events SET connection_id=?,sql_operation=?,sql_hash=?,query_request_id=?,export_format=?,returned_rows=?,affected_rows=?,sql_text=?,user_id=?,login=?,finished_at=?,duration_ms=?,http_status=?,outcome=?,code=? WHERE request_id=? AND outcome='pending'")) {
+            bindMetadata(sql, 1, event); sql.setString(9, event.userId); sql.setString(10, event.login); sql.setLong(11, event.finishedAt); sql.setLong(12, event.durationMs); sql.setInt(13, event.httpStatus); sql.setString(14, event.outcome); sql.setString(15, event.code); sql.setString(16, event.requestId);
             if (sql.executeUpdate() != 1) throw new Unavailable();
         } catch (Exception error) { throw new Unavailable(); }
     }
@@ -137,15 +146,16 @@ final class AuditStore {
         if (!(event.action.equals("result.export_requested") ? event.source.equals("browser") : event.source.equals("server"))) throw new IllegalArgumentException("Invalid event source");
         if (event.connectionId != null && !event.connectionId.matches("[a-zA-Z0-9_-]{1,100}")) throw new IllegalArgumentException("Invalid connection reference");
         if (event.sqlOperation != null && !OPERATIONS.contains(event.sqlOperation) || event.sqlHash != null && !event.sqlHash.matches("[0-9a-f]{64}")) throw new IllegalArgumentException("Invalid SQL metadata");
+        if (event.sqlText != null && !event.action.equals("query.execute")) throw new IllegalArgumentException("SQL text requires query activity");
         if (event.queryRequestId != null && !event.queryRequestId.matches("[0-9a-f-]{36}") || event.exportFormat != null && !Set.of("csv", "json").contains(event.exportFormat)) throw new IllegalArgumentException("Invalid export metadata");
         if (event.returnedRows != null && event.returnedRows < 0 || event.affectedRows != null && event.affectedRows < 0) throw new IllegalArgumentException("Invalid row count");
         if (event.code != null && !(event.code.equals("OK") || event.code.matches("HTTP_[345][0-9]{2}") || Set.of("AUTH_INVALID_STATE", "AUTH_FAILED", "AUTH_DENIED", "AUTH_NOT_ALLOWED", "AUTH_BUSY", "AUTH_NOT_CONFIGURED").contains(event.code))) throw new IllegalArgumentException("Invalid safe outcome code");
     }
     private static void bindMetadata(PreparedStatement sql, int index, Event event) throws Exception {
-        sql.setString(index++, event.connectionId); sql.setString(index++, event.sqlOperation); sql.setString(index++, event.sqlHash); sql.setString(index++, event.queryRequestId); sql.setString(index++, event.exportFormat); sql.setObject(index++, event.returnedRows); sql.setObject(index, event.affectedRows);
+        sql.setString(index++, event.connectionId); sql.setString(index++, event.sqlOperation); sql.setString(index++, event.sqlHash); sql.setString(index++, event.queryRequestId); sql.setString(index++, event.exportFormat); sql.setObject(index++, event.returnedRows); sql.setObject(index++, event.affectedRows); sql.setString(index, event.sqlText);
     }
     private static Event read(ResultSet rows) throws Exception {
-        Event e = new Event(); e.id = rows.getLong("id"); e.requestId = rows.getString("request_id"); e.userId = rows.getString("user_id"); e.login = rows.getString("login"); e.action = rows.getString("action"); e.source = rows.getString("source"); e.connectionId = rows.getString("connection_id"); e.sqlOperation = rows.getString("sql_operation"); e.sqlHash = rows.getString("sql_hash"); e.queryRequestId = rows.getString("query_request_id"); e.exportFormat = rows.getString("export_format"); e.returnedRows = nullableLong(rows,"returned_rows"); e.affectedRows = nullableLong(rows,"affected_rows"); e.startedAt = rows.getLong("started_at"); e.finishedAt = nullableLong(rows,"finished_at"); e.durationMs = nullableLong(rows,"duration_ms"); var status = nullableLong(rows,"http_status"); e.httpStatus = status == null ? null : status.intValue(); e.outcome = rows.getString("outcome"); e.code = rows.getString("code"); return e;
+        Event e = new Event(); e.sqlText = rows.getString("sql_text"); e.id = rows.getLong("id"); e.requestId = rows.getString("request_id"); e.userId = rows.getString("user_id"); e.login = rows.getString("login"); e.action = rows.getString("action"); e.source = rows.getString("source"); e.connectionId = rows.getString("connection_id"); e.sqlOperation = rows.getString("sql_operation"); e.sqlHash = rows.getString("sql_hash"); e.queryRequestId = rows.getString("query_request_id"); e.exportFormat = rows.getString("export_format"); e.returnedRows = nullableLong(rows,"returned_rows"); e.affectedRows = nullableLong(rows,"affected_rows"); e.startedAt = rows.getLong("started_at"); e.finishedAt = nullableLong(rows,"finished_at"); e.durationMs = nullableLong(rows,"duration_ms"); var status = nullableLong(rows,"http_status"); e.httpStatus = status == null ? null : status.intValue(); e.outcome = rows.getString("outcome"); e.code = rows.getString("code"); return e;
     }
     private static Long nullableLong(ResultSet rows, String name) throws Exception { long value = rows.getLong(name); return rows.wasNull() ? null : value; }
     private Connection open() throws Exception {
@@ -158,14 +168,14 @@ final class AuditStore {
 
     static final class Event {
         long id, startedAt = System.currentTimeMillis();
-        String requestId = UUID.randomUUID().toString(), userId, login, action, source, connectionId, sqlOperation, sqlHash, queryRequestId, exportFormat, outcome = "pending", code;
+        String requestId = UUID.randomUUID().toString(), userId, login, action, source, connectionId, sqlOperation, sqlHash, sqlText, queryRequestId, exportFormat, outcome = "pending", code;
         Long finishedAt, durationMs, returnedRows, affectedRows;
         Integer httpStatus;
         private Event() { }
         Event(GitHubAuth.User actor, String action, String source) { this.action = action; this.source = source; actor(actor); }
         void actor(GitHubAuth.User actor) { userId = actor == null ? null : actor.id(); login = actor == null ? null : actor.login(); }
         String toJson() {
-            return "{\"id\":" + JsonUtil.quote(Long.toString(id)) + ",\"requestId\":" + JsonUtil.quote(requestId) + ",\"userId\":" + JsonUtil.quote(userId) + ",\"login\":" + JsonUtil.quote(login) + ",\"action\":" + JsonUtil.quote(action) + ",\"source\":" + JsonUtil.quote(source) + ",\"connectionId\":" + JsonUtil.quote(connectionId) + ",\"sqlOperation\":" + JsonUtil.quote(sqlOperation) + ",\"sqlHash\":" + JsonUtil.quote(sqlHash) + ",\"queryRequestId\":" + JsonUtil.quote(queryRequestId) + ",\"exportFormat\":" + JsonUtil.quote(exportFormat) + ",\"returnedRows\":" + returnedRows + ",\"affectedRows\":" + affectedRows + ",\"startedAt\":" + JsonUtil.quote(Instant.ofEpochMilli(startedAt).toString()) + ",\"finishedAt\":" + (finishedAt == null ? "null" : JsonUtil.quote(Instant.ofEpochMilli(finishedAt).toString())) + ",\"durationMs\":" + durationMs + ",\"httpStatus\":" + httpStatus + ",\"outcome\":" + JsonUtil.quote(outcome) + ",\"code\":" + JsonUtil.quote(code) + "}";
+            return "{\"sqlText\":" + JsonUtil.quote(sqlText) + ",\"id\":" + JsonUtil.quote(Long.toString(id)) + ",\"requestId\":" + JsonUtil.quote(requestId) + ",\"userId\":" + JsonUtil.quote(userId) + ",\"login\":" + JsonUtil.quote(login) + ",\"action\":" + JsonUtil.quote(action) + ",\"source\":" + JsonUtil.quote(source) + ",\"connectionId\":" + JsonUtil.quote(connectionId) + ",\"sqlOperation\":" + JsonUtil.quote(sqlOperation) + ",\"sqlHash\":" + JsonUtil.quote(sqlHash) + ",\"queryRequestId\":" + JsonUtil.quote(queryRequestId) + ",\"exportFormat\":" + JsonUtil.quote(exportFormat) + ",\"returnedRows\":" + returnedRows + ",\"affectedRows\":" + affectedRows + ",\"startedAt\":" + JsonUtil.quote(Instant.ofEpochMilli(startedAt).toString()) + ",\"finishedAt\":" + (finishedAt == null ? "null" : JsonUtil.quote(Instant.ofEpochMilli(finishedAt).toString())) + ",\"durationMs\":" + durationMs + ",\"httpStatus\":" + httpStatus + ",\"outcome\":" + JsonUtil.quote(outcome) + ",\"code\":" + JsonUtil.quote(code) + "}";
         }
     }
     record Page(List<Event> events, String nextCursor, boolean isAdmin) {

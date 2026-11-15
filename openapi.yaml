@@ -355,7 +355,7 @@ paths:
     parameters:
       - $ref: '#/components/parameters/ExpectedAccount'
     get:
-      summary: List safe activity metadata for the verified account
+      summary: List activity and submitted query SQL for the verified account
       description: Default scope mine. Only audit admins can use scope all or the userId filter. Anonymous login failures are visible only in admin all scope. Reading audit does not open JDBC or load connection profiles and creates no recursive audit event. Unknown or duplicate filters are rejected. Cursor is an exclusive insertion ID in descending order; new records do not shift subsequent pages.
       parameters:
         - { in: query, name: scope, schema: { type: string, enum: [mine, all], default: mine } }
@@ -488,7 +488,7 @@ components:
       enum: [auth.start, auth.login, auth.logout, connection.list, connection.save, connection.test, connection.connect, connection.details, connection.disconnect, connection.delete, query.execute, metadata.databases, metadata.namespaces, metadata.tables, metadata.columns, result.export_requested]
     ActivityEvent:
       type: object
-      description: Safe append-only activity metadata, independent of current connection profiles. Pending means the outcome was not recorded, including process crashes or completion storage failures.
+      description: Append-only activity, independent of current connection profiles. Query activity includes submitted SQL text, which may contain sensitive literals and is visible only to its owner or audit admins. Pending means the outcome was not recorded, including process crashes or completion storage failures; SQL text does not prove execution succeeded.
       required: [id, requestId, userId, login, action, source, startedAt, outcome]
       properties:
         id: { type: string, description: Monotonic internal sequence serialized without JS integer precision loss }
@@ -499,7 +499,8 @@ components:
         source: { type: string, enum: [server, browser] }
         connectionId: { type: string, nullable: true }
         sqlOperation: { type: string, nullable: true }
-        sqlHash: { type: string, nullable: true, description: SHA-256 fingerprint of submitted SQL; no SQL text }
+        sqlHash: { type: string, nullable: true, description: SHA-256 fingerprint of submitted SQL }
+        sqlText: { type: string, nullable: true, description: Submitted SQL for query.execute only; null for historical records and other actions. Includes literals and comments; not redacted. }
         queryRequestId: { type: string, nullable: true }
         exportFormat: { type: string, nullable: true, enum: [csv, json] }
         returnedRows: { type: integer, format: int64, nullable: true, minimum: 0 }

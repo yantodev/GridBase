@@ -32,7 +32,7 @@
         'Kode: ' + (event.code || '—'), 'Sumber: ' + event.source, 'Baris hasil: ' + (event.returnedRows ?? '—'),
         'Baris terdampak: ' + (event.affectedRows ?? '—'), 'SQL fingerprint: ' + (event.sqlHash || '—'),
         'Referensi query: ' + (event.queryRequestId || '—'), 'Format ekspor: ' + (event.exportFormat || '—')
-      ].join('\n');
+      ].join('\n') + (event.action === 'query.execute' ? '\n\nSQL:\n' + (event.sqlText ?? 'Teks SQL tidak tersedia untuk aktivitas ini.') : '');
       $('detail').hidden = false;
     }
     function render(events) {

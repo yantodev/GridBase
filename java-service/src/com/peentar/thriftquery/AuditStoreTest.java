@@ -48,10 +48,26 @@ public final class AuditStoreTest {
             for (var task : pending) task.join();
             check(store.list("1001", false, Map.of()).events().size() == 14, "Concurrent actors remain correctly attributed");
             if (root.getFileSystem().supportedFileAttributeViews().contains("posix")) check(Files.getPosixFilePermissions(root.resolve("audit.sqlite")).equals(java.nio.file.attribute.PosixFilePermissions.fromString("rw-------")), "Audit database remains private");
-            try (var db = DriverManager.getConnection("jdbc:sqlite:" + root.resolve("audit.sqlite")); var sql = db.createStatement()) { sql.executeUpdate("PRAGMA user_version=2"); }
+            migrateLegacyStore(root.resolve("legacy"));
+            try (var db = DriverManager.getConnection("jdbc:sqlite:" + root.resolve("audit.sqlite")); var sql = db.createStatement()) { sql.executeUpdate("PRAGMA user_version=3"); }
             try { new AuditStore(root); throw new AssertionError("Future schema overwritten"); } catch (AuditStore.Unavailable expected) { }
             System.out.println("Persistent audit store tests passed");
         } finally { try (var files = Files.walk(root)) { for (var file : files.sorted(java.util.Comparator.reverseOrder()).toList()) Files.deleteIfExists(file); } }
+    }
+    private static void migrateLegacyStore(Path root) throws Exception {
+        Files.createDirectories(root);
+        try (var db = DriverManager.getConnection("jdbc:sqlite:" + root.resolve("audit.sqlite")); var sql = db.createStatement()) {
+            sql.executeUpdate("CREATE TABLE audit_events (id INTEGER PRIMARY KEY AUTOINCREMENT, request_id TEXT UNIQUE NOT NULL, user_id TEXT, login TEXT, action TEXT NOT NULL, source TEXT NOT NULL, connection_id TEXT, sql_operation TEXT, sql_hash TEXT, query_request_id TEXT, export_format TEXT, returned_rows INTEGER, affected_rows INTEGER, started_at INTEGER NOT NULL, finished_at INTEGER, duration_ms INTEGER, http_status INTEGER, outcome TEXT NOT NULL, code TEXT)");
+            sql.executeUpdate("INSERT INTO audit_events(request_id,user_id,login,action,source,started_at,outcome) VALUES('11111111-1111-4111-8111-111111111111','1001','alice','query.execute','server',0,'pending')");
+            sql.executeUpdate("PRAGMA user_version=1");
+        }
+        var migrated = new AuditStore(root);
+        String history = migrated.list("1001", false, Map.of()).toJson();
+        check(history.contains("11111111-1111-4111-8111-111111111111") && history.contains("\"sqlText\":null"), "Migration retains historical SQL activity without inventing query text");
+        check(new AuditStore(root).list("1001", false, Map.of()).events().size() == 1, "Migration can be reopened without duplicate records");
+        try (var db = DriverManager.getConnection("jdbc:sqlite:" + root.resolve("audit.sqlite")); var sql = db.createStatement(); var version = sql.executeQuery("PRAGMA user_version")) {
+            check(version.next() && version.getInt(1) == 2, "SQL text migration advances schema version");
+        }
     }
     private static void check(boolean ok, String message) { if (!ok) throw new AssertionError(message); }
 }

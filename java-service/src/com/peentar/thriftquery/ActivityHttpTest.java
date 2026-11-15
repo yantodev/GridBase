@@ -63,6 +63,11 @@ public final class ActivityHttpTest {
             var result = request(base, "/api/query", alice, "POST", "{\"sql\":" + JsonUtil.quote(sql) + ",\"connectionId\":" + JsonUtil.quote(aliceConnection) + "}", 200);
             String queryId = JsonUtil.stringField(result.body(), "requestId");
             check(queryId.equals(result.headers().firstValue("X-Request-ID").orElse("")), "Query response correlates with server-generated request ID");
+            String queryHistory = request(base, "/api/activity?action=query.execute", alice, "GET", null, 200).body();
+            check(queryHistory.contains("\"sqlText\":" + JsonUtil.quote(sql)), "SQL activity includes the submitted query text");
+            check(!request(base, "/api/activity", bob, "GET", null, 200).body().contains("sensitive_sql_literal"), "SQL text remains private to its owner");
+            check(request(base, "/api/activity?scope=all&action=query.execute", admin, "GET", null, 200).body().contains("\"sqlText\":" + JsonUtil.quote(sql)), "Audit administrator can inspect SQL text");
+            check(request(base, "/api/activity?action=connection.connect", alice, "GET", null, 200).body().contains("\"sqlText\":null"), "Non-SQL activity has no SQL text");
             request(base, "/api/query", bob, "POST", "{\"sql\":\"SELECT 1 LIMIT 1\",\"connectionId\":" + JsonUtil.quote(bobConnection) + "}", 200);
             request(base, "/api/tables?namespace=app&connectionId=" + aliceConnection, alice, "GET", null, 200);
             request(base, "/api/query", bob, "POST", "{\"sql\":\"DELETE FROM fixture\",\"connectionId\":" + JsonUtil.quote(aliceConnection) + "}", 404);
@@ -80,9 +85,12 @@ public final class ActivityHttpTest {
             String update = request(base, "/api/query", alice, "POST", "{\"sql\":\"UPDATE fixture SET id=2\",\"connectionId\":" + JsonUtil.quote(aliceConnection) + "}", 200).body();
             check(request(base, "/api/activity?action=query.execute", alice, "GET", null, 200).body().contains("\"affectedRows\":1"), "Affected count captured");
             request(base, "/api/query", alice, "POST", "{\"sql\":\"\"}", 422);
+            var rejected = request(base, "/api/query", alice, "POST", "{\"sql\":\"SELECT 1; DELETE FROM fixture\"}", 422);
+            checkSql(config, rejected.headers().firstValue("X-Request-ID").orElseThrow(), "SELECT 1; DELETE FROM fixture", "failure");
             failJdbc.set(true);
             String failedId = request(base, "/api/query", alice, "POST", "{\"sql\":\"SELECT 1 LIMIT 1\",\"connectionId\":" + JsonUtil.quote(aliceConnection) + "}", 502).headers().firstValue("X-Request-ID").orElseThrow();
             failJdbc.set(false);
+            checkSql(config, failedId, "SELECT 1 LIMIT 1", "failure");
             request(base, "/api/activity/exports", alice, "POST", "{\"queryRequestId\":" + JsonUtil.quote(failedId) + ",\"format\":\"csv\",\"rowCount\":0}", 404);
             int before = opened.get();
             request(base, "/api/query-extra", bob, "POST", "{\"sql\":\"DELETE FROM fixture\"}", 404);
@@ -103,6 +111,7 @@ public final class ActivityHttpTest {
             check(incomplete.headers().firstValue("X-GridBase-Audit-Warning").orElse("").equals("incomplete"), "Completion failure preserves successful SQL with warning");
             String incompleteId = JsonUtil.stringField(incomplete.body(), "requestId");
             check(new AuditStore(config.dataDir).list("1001", false, Map.of("outcome", "pending")).toJson().contains(incompleteId), "Durable intent remains pending");
+            checkSql(config, incompleteId, "SELECT 1 LIMIT 1", "pending");
             sql(config, "DROP TRIGGER fail_finish");
             sql(config, "CREATE TRIGGER fail_annotate BEFORE UPDATE ON audit_events WHEN NEW.outcome = 'pending' BEGIN SELECT RAISE(FAIL, 'fixture'); END");
             before = opened.get();
@@ -130,7 +139,7 @@ public final class ActivityHttpTest {
             check(request(base, "/api/activity?action=auth.logout", bob, "GET", null, 200).body().contains("\"outcome\":\"success\""), "Logout attributed before revocation");
             var audit = request(base, "/api/activity?action=query.execute", alice, "GET", null, 200).body();
             check(audit.contains(queryId) && audit.contains("\"sqlOperation\":\"SELECT\"") && audit.contains("\"returnedRows\":1"), "Query metadata and counts recorded");
-            check(!audit.contains("sensitive_sql_literal") && !audit.contains("alice-private-password"), "Audit API never exposes SQL text or credentials");
+            check(audit.contains("\"sqlText\":" + JsonUtil.quote(sql)) && !audit.contains("alice-private-password"), "Audit API includes SQL but excludes connection credentials");
             request(base, "/api/connections/" + aliceConnection, alice, "DELETE", null, 200);
             String export = "{\"queryRequestId\":" + JsonUtil.quote(queryId) + ",\"format\":\"csv\",\"rowCount\":1,\"userId\":\"2002\",\"source\":\"server\"}";
             request(base, "/api/activity/exports", alice, "POST", export, 200);
@@ -156,10 +165,11 @@ public final class ActivityHttpTest {
             StringBuilder diskBytes = new StringBuilder();
             try (var files = Files.list(config.dataDir)) { for (var file : files.filter(f -> f.getFileName().toString().startsWith("audit.sqlite")).toList()) diskBytes.append(new String(Files.readAllBytes(file), StandardCharsets.ISO_8859_1)); }
             String disk = diskBytes.toString();
-            check(!disk.contains("sensitive_sql_literal") && !disk.contains("alice-private-password") && !disk.contains("jdbc:postgresql") && !disk.contains("raw_error_secret") && !disk.contains("oauth-secret"), "Sensitive payloads absent on disk");
+            check(disk.contains("sensitive_sql_literal") && !disk.contains("alice-private-password") && !disk.contains("jdbc:postgresql") && !disk.contains("raw_error_secret") && !disk.contains("oauth-secret"), "Only submitted SQL text, not unrelated sensitive payloads, is persisted");
             server.stop(); server = server(config, factory); server.start(0); base = "http://127.0.0.1:" + server.port();
             alice = login(base, "alice-renamed");
-            check(request(base, "/api/activity", alice, "GET", null, 200).body().contains(queryId), "Audit persists after restart");
+            String restored = request(base, "/api/activity", alice, "GET", null, 200).body();
+            check(restored.contains(queryId) && restored.contains("\"sqlText\":" + JsonUtil.quote(sql)), "SQL audit persists after restart");
             Path profiles = config.dataDir.resolve("gridbase.sqlite"), held = config.dataDir.resolve("profiles-held.sqlite");
             Files.move(profiles, held); Files.createDirectory(profiles);
             try {
@@ -191,6 +201,12 @@ public final class ActivityHttpTest {
             check(!records.contains("provider-secret"), "Provider error content is excluded");
         } finally {
             server.stop(); try (var files = Files.walk(root)) { for (var file : files.sorted(java.util.Comparator.reverseOrder()).toList()) Files.deleteIfExists(file); }
+        }
+    }
+    private static void checkSql(AppConfig config, String requestId, String expected, String outcome) throws Exception {
+        try (var db = java.sql.DriverManager.getConnection("jdbc:sqlite:" + config.dataDir.resolve("audit.sqlite")); var statement = db.prepareStatement("SELECT sql_text,outcome FROM audit_events WHERE request_id=?")) {
+            statement.setString(1, requestId);
+            try (var rows = statement.executeQuery()) { check(rows.next() && expected.equals(rows.getString(1)) && outcome.equals(rows.getString(2)), "SQL text is durable for the exact " + outcome + " request"); }
         }
     }
     private static void sql(AppConfig config, String statement) throws Exception {

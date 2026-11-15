@@ -4,7 +4,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const vm = require('node:vm');
 const C = require('../public/workbench-core');
-function setup({configured=true,offline=false,storage=new Map(),connections,accountId='1001',auditAdmin=false}={}) {
+function setup({configured=true,offline=false,storage=new Map(),connections,accountId='1001',auditAdmin=false,confirm=()=>true}={}) {
   let sources=(connections || (configured ? [{id:'default',name:'Spark Thrift / Hive',type:'hive'}] : [])).map(item=>({connected:true,...item}));
   const settings=new Map(sources.map(item=>[item.id,{...item,host:'fixture',port:item.type==='mysql'?'3306':'5432',database:'app',username:'fixture',password:'saved-secret',jdbcUrl:item.type==='hive'?'jdbc:hive2://fixture/app;token=saved-token':`jdbc:${item.type}://fixture/app`}]));
   let document;
@@ -48,9 +48,9 @@ function setup({configured=true,offline=false,storage=new Map(),connections,acco
   const workspace=new Element();nodes.set('.workbench',workspace);
   document={body:new Element('body'),activeElement:null,querySelector(selector){const found=nodes.get(selector)||[...nodes.values()].flatMap(n=>n.querySelectorAll('*')).find(n=>selector==='#'+n.id);assert.ok(found,'Unknown DOM selector: '+selector);return found;},createElement:tag=>new Element(tag),createElementNS:(ns,tag)=>new Element(tag),addEventListener(){}};
   let queryResponse=null, connectResponse=null, metadataResponse=null, detailsResponse=null, activityResponse=null, exportResponse=null, auditWarning=false;
-  const requests=[];
+  const requests=[],confirmations=[];
   const fixture=(count=23)=>({requestId:'11111111-1111-4111-8111-111111111111',columns:['id','name'],rows:Array.from({length:count},(_,i)=>({id:String(i+1),name:i===0?null:'row '+(i+1)})),rowCount:count,durationMs:12,truncated:false,updateCount:null});
-  const context=vm.createContext({document,window:{WorkbenchCore:C,GridBaseSession:{user:{id:accountId,login:'fixture-user'},capabilities:{auditAdmin}},localStorage:{getItem:key=>storage.get(key)||null,setItem:(key,value)=>storage.set(key,value)},matchMedia:()=>({matches:false,addEventListener(){}}),clearTimeout(){},setTimeout(){},addEventListener(){},confirm:()=>true},fetch:async(url,options)=>{
+  const context=vm.createContext({document,window:{WorkbenchCore:C,GridBaseSession:{user:{id:accountId,login:'fixture-user'},capabilities:{auditAdmin}},localStorage:{getItem:key=>storage.get(key)||null,setItem:(key,value)=>storage.set(key,value)},matchMedia:()=>({matches:false,addEventListener(){}}),clearTimeout(){},setTimeout(){},addEventListener(){},confirm:message=>{confirmations.push(message);return confirm(message);}},fetch:async(url,options)=>{
     requests.push({url,options});if(offline)throw new Error('offline');
     let data;
     if(url==='/api/activity/exports')data=exportResponse?await exportResponse:{ok:true,requestId:'export-id'};
@@ -80,7 +80,7 @@ function setup({configured=true,offline=false,storage=new Map(),connections,acco
   },Event:class {constructor(type){this.type=type;}},Blob,URL,URLSearchParams});
   if(fs.existsSync('public/activity.js'))vm.runInContext(fs.readFileSync('public/activity.js','utf8'),context);
   vm.runInContext(fs.readFileSync('public/app.js','utf8'),context);
-  return {context,nodes,storage,requests,fixture,settings,setActivity:value=>{activityResponse=value;},setExport:value=>{exportResponse=value;},setAuditWarning:value=>{auditWarning=value;},setDetails:value=>{detailsResponse=value;},setQuery:value=>{queryResponse=value;},setConnect:value=>{connectResponse=value;},setMetadata:value=>{metadataResponse=value;},get:id=>nodes.get('#'+id),read:code=>vm.runInContext(code,context)};
+  return {context,nodes,storage,requests,confirmations,fixture,settings,setActivity:value=>{activityResponse=value;},setExport:value=>{exportResponse=value;},setAuditWarning:value=>{auditWarning=value;},setDetails:value=>{detailsResponse=value;},setQuery:value=>{queryResponse=value;},setConnect:value=>{connectResponse=value;},setMetadata:value=>{metadataResponse=value;},get:id=>nodes.get('#'+id),read:code=>vm.runInContext(code,context)};
 }
 const flush=async()=>{for(let i=0;i<4;i++)await new Promise(setImmediate);};
 test('drafts, SQL history and cached connections are private to the verified account',async()=>{
@@ -131,6 +131,54 @@ test('in-flight results stay with their originating console and current statemen
   app.context.switchTab(origin);assert.equal(app.read('active().result.rows.length'),4);assert.equal(app.get('results-range').textContent,'1–4 of 4 rows');
   app.context.closeTab(origin);assert.equal(app.read('active().id'),other);assert.equal(app.get('sql-editor').value,'SELECT 3;');
 });
+test('cancelled UPDATE and DELETE preserve results and history without sending SQL',async()=>{
+  const app=setup({confirm:()=>false});await flush();await app.context.runQuery('SELECT 1');
+  const prior=app.read('active().result'),history=app.read('JSON.stringify(state.history)'),output=app.get('query-output').textContent;
+  const count=app.requests.filter(r=>r.url==='/api/query').length;
+  for(const sql of ['UPDATE fixture SET id=2 WHERE id=1','/* remove */\n delete FROM fixture WHERE id=1']) {
+    await app.context.runQuery(sql);
+    assert.equal(app.requests.filter(r=>r.url==='/api/query').length,count);
+    assert.equal(app.read('active().result'),prior);assert.equal(app.read('JSON.stringify(state.history)'),history);
+    assert.equal(app.get('query-output').textContent,output);assert.equal(app.read('active().running'),false);
+    assert.ok(app.confirmations.at(-1).includes(sql));assert.match(app.confirmations.at(-1),/Spark Thrift/);
+  }
+  assert.equal(app.confirmations.length,2);
+});
+
+for(const [name,sql] of [
+  ['dollar-quoted literal','WITH c AS (SELECT $$($$) DELETE FROM fixture;'],
+  ['SEARCH clause','WITH RECURSIVE c(id) AS (SELECT 1) SEARCH DEPTH FIRST BY id SET ordering DELETE FROM fixture;'],
+  ['CYCLE clause','WITH RECURSIVE c(id) AS (SELECT 1) CYCLE id SET is_cycle USING path UPDATE fixture SET id=2;'],
+  ['ANALYSE alias','EXPLAIN ANALYSE DELETE FROM fixture;']
+]) test('cancel confirmation blocks PostgreSQL mutation with '+name,async()=>{
+  const app=setup({confirm:()=>false,connections:[{id:'pg',name:'PostgreSQL',type:'postgresql'}]});await flush();
+  await app.context.runQuery(sql);
+  assert.equal(app.requests.filter(r=>r.url==='/api/query').length,0);
+  assert.equal(app.confirmations.length,1);assert.ok(app.confirmations[0].includes(sql));
+});
+
+test('confirmation precedes execution and sends exactly the selected mutation to its connection',async()=>{
+  let app;
+  app=setup({confirm:()=>{assert.equal(app.requests.filter(r=>r.url==='/api/query').length,0);return true;}});await flush();
+  const editor=app.get('sql-editor');editor.value='SELECT 1;\nUPDATE fixture SET id=2;\nDELETE FROM fixture;';
+  editor.setSelectionRange(editor.value.indexOf('UPDATE'),editor.value.indexOf('\nDELETE'));
+  await app.get('run-query').click();
+  assert.equal(app.confirmations.length,1);assert.match(app.confirmations[0],/UPDATE/);assert.doesNotMatch(app.confirmations[0],/DELETE FROM/);
+  assert.deepEqual(JSON.parse(app.requests.findLast(r=>r.url==='/api/query').options.body),{sql:'UPDATE fixture SET id=2;',connectionId:'default'});
+});
+
+test('keyboard execution confirms mutating CTEs but not an unrelated current SELECT',async()=>{
+  const app=setup({confirm:()=>false});await flush();const editor=app.get('sql-editor');
+  const sql='WITH removed AS (DELETE FROM fixture RETURNING *) SELECT * FROM removed;';
+  editor.value='SELECT 1;\n'+sql;editor.setSelectionRange(2,2);
+  await editor.emit('keydown',{key:'Enter',ctrlKey:true});await flush();
+  assert.equal(app.confirmations.length,0);assert.equal(app.requests.filter(r=>r.url==='/api/query').length,1);
+  editor.setSelectionRange(editor.value.indexOf('DELETE')+2,editor.value.indexOf('DELETE')+2);
+  await editor.emit('keydown',{key:'Enter',metaKey:true});await flush();
+  assert.equal(app.confirmations.length,1);assert.ok(app.confirmations[0].includes(sql));
+  assert.equal(app.requests.filter(r=>r.url==='/api/query').length,1);
+});
+
 test('zero and unknown affected counts, offline and missing configuration are distinct',async()=>{
   const app=setup();await flush();
   for(const [count,expected] of [[0,'0 rows affected.'],[null,'The server did not report an affected-row count.']]){
@@ -357,6 +405,22 @@ test('Activity opens own server history using safe text and preserves the SQL co
   await row.children[6].children[0].click();assert.match(app.get('activity-detail').textContent,/request-1/);
   await app.get('database-tool').click();
   assert.equal(app.nodes.get('.workbench').hidden,false);assert.equal(app.get('sql-editor').value,'SELECT private_draft');
+});
+
+test('Activity displays SQL text safely only for query events and handles historical records',async()=>{
+  const app=setup();await flush();
+  const sql="UPDATE fixture SET name='<img src=x onerror=alert(1)>'\nWHERE id=1;";
+  app.setActivity(async()=>({events:[
+    {requestId:'sql',action:'query.execute',sqlText:sql,outcome:'success'},
+    {requestId:'old',action:'query.execute',sqlText:null,outcome:'success'},
+    {requestId:'other',action:'connection.connect',sqlText:'not SQL activity',outcome:'success'}
+  ],nextCursor:null}));
+  await app.get('activity-tool').click();await flush();
+  const rows=app.get('activity-table').children[1].children;
+  await rows[0].children[6].children[0].click();
+  assert.ok(app.get('activity-detail').textContent.includes(sql));assert.equal(app.get('activity-detail').children.length,0);
+  await rows[1].children[6].children[0].click();assert.match(app.get('activity-detail').textContent,/SQL.*tidak tersedia/i);
+  await rows[2].children[6].children[0].click();assert.doesNotMatch(app.get('activity-detail').textContent,/not SQL activity|SQL:\n/);
 });
 
 test('Activity admin filters paginate and ignore stale filter responses',async()=>{
