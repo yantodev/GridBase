@@ -28,6 +28,11 @@ public final class AppConfigTest {
             check(auth.auth.secure() && auth.auth.appUrl().equals("https://gridbase.example") && auth.auth.allowedUsers().equals(java.util.Set.of("alice", "bob")), "Normalize origin and GitHub allowlist");
             check(AppConfig.load(root, Map.of("APP_URL", "https://GridBase.example:443/")).auth.appUrl().equals("https://gridbase.example"), "Origin matches the browser with a default port and mixed-case hostname");
             check(AppConfig.load(root, Map.of("LEGACY_CONNECTION_OWNER_ID", "1001")).legacyConnectionOwnerId.equals("1001"), "Trusted numeric migration target");
+            check(AppConfig.load(root, Map.of("AUDIT_ADMIN_IDS", "1001, 2002,1001")).auditAdminIds.equals(java.util.Set.of("1001", "2002")), "Audit admins use distinct verified numeric IDs");
+            for (String invalid : java.util.List.of("alice", "0", "1001,", "-1")) {
+                try { AppConfig.load(root, Map.of("AUDIT_ADMIN_IDS", invalid)); throw new AssertionError("Invalid audit admin"); }
+                catch (IllegalArgumentException expected) { }
+            }
             for (String invalid : java.util.List.of("alice", "0", "-1")) {
                 try { AppConfig.load(root, Map.of("LEGACY_CONNECTION_OWNER_ID", invalid)); throw new AssertionError("Invalid legacy owner"); }
                 catch (IllegalArgumentException expected) { }

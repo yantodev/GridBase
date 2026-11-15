@@ -119,3 +119,11 @@ test('an old session check cannot redisplay hidden data or suppress verification
   await pending;
   assert.equal(app.node('#app').hidden, true);
 });
+
+
+test('audit capability is frozen from the verified server session and defaults to false',async()=>{
+  const admin=page('session.js',{authenticated:true,user:{id:'9009',login:'admin'},capabilities:{auditAdmin:true}});await flush();
+  assert.equal(admin.window.GridBaseSession.capabilities.auditAdmin,true);
+  assert.equal(Object.isFrozen(admin.window.GridBaseSession.capabilities),true);
+  const regular=page('session.js');await flush();assert.equal(regular.window.GridBaseSession.capabilities.auditAdmin,false);
+});

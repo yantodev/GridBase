@@ -15,8 +15,9 @@ public final class AppConfig {
     public final Path dataDir;
     final AuthConfig auth;
     final String legacyConnectionOwnerId;
+    final java.util.Set<String> auditAdminIds;
 
-    private AppConfig(String host, int port, int timeoutSeconds, int defaultQueryLimit, Path publicDir, AuthConfig auth, String legacyConnectionOwnerId) {
+    private AppConfig(String host, int port, int timeoutSeconds, int defaultQueryLimit, Path publicDir, AuthConfig auth, String legacyConnectionOwnerId, String auditAdmins) {
         this.host = host;
         this.port = port;
         this.timeoutSeconds = timeoutSeconds;
@@ -25,6 +26,9 @@ public final class AppConfig {
         this.dataDir = publicDir.getParent().resolve("data");
         this.auth = auth;
         this.legacyConnectionOwnerId = legacyConnectionOwnerId.isBlank() ? "" : GitHubAuth.validId(legacyConnectionOwnerId);
+        java.util.Set<String> ids = new java.util.HashSet<>();
+        if (!auditAdmins.isBlank()) for (String id : auditAdmins.split(",", -1)) ids.add(GitHubAuth.validId(id.trim()));
+        this.auditAdminIds = java.util.Set.copyOf(ids);
     }
 
     public static AppConfig load(Path projectRoot) {
@@ -44,7 +48,8 @@ public final class AppConfig {
                         value("GITHUB_CLIENT_ID", environment, fileValues, ""),
                         value("GITHUB_CLIENT_SECRET", environment, fileValues, ""),
                         AuthConfig.users(value("GITHUB_ALLOWED_USERS", environment, fileValues, ""))),
-                value("LEGACY_CONNECTION_OWNER_ID", environment, fileValues, "").trim()
+                value("LEGACY_CONNECTION_OWNER_ID", environment, fileValues, "").trim(),
+                value("AUDIT_ADMIN_IDS", environment, fileValues, "")
         );
     }
 

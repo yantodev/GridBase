@@ -64,7 +64,7 @@ final class GitHubAuth {
     }
 
     /** Returns true when the request was fully handled, false when the protected handler may run. */
-    boolean handle(HttpExchange exchange) throws IOException {
+    boolean handle(HttpExchange exchange, Set<String> auditAdmins) throws IOException {
         long now = clock.getAsLong();
         pending.entrySet().removeIf(entry -> entry.getValue().expiresAt() <= now);
         sessions.entrySet().removeIf(entry -> entry.getValue().expiresAt() <= now);
@@ -94,7 +94,8 @@ final class GitHubAuth {
         if (path.equals("/api/auth/session")) {
             if (!method.equals("GET")) return methodNotAllowed(exchange, "GET");
             json(exchange, 200, "{\"authenticated\":" + (session != null) + ",\"configured\":" + config.configured()
-                    + ",\"user\":" + (session == null ? "null" : session.user().toJson()) + "}");
+                    + ",\"user\":" + (session == null ? "null" : session.user().toJson())
+                    + ",\"capabilities\":{\"auditAdmin\":" + (session != null && auditAdmins.contains(session.user().id())) + "}}");
             return true;
         }
         if (PUBLIC_FILES.contains(path) && method.equals("GET")) {
@@ -147,6 +148,7 @@ final class GitHubAuth {
         if (!config.configured() || code.isBlank() || code.length() > 2048) { redirect(exchange, "/login?error=failed"); return; }
         try {
             User user = java.util.Objects.requireNonNull(provider.login(code, attempt.verifier()));
+            ActivityAudit.actor(exchange, user);
             String login = user.login();
             if (!config.allowedUsers().isEmpty() && !config.allowedUsers().contains(login.toLowerCase(Locale.ROOT))) {
                 redirect(exchange, "/login?error=not_allowed"); return;

@@ -173,5 +173,7 @@ test('legacy backend exposes its default source and rejects foreign IDs before e
     assert.ok(Array.isArray(sources.connections));assert.ok(sources.connections.every(item=>item.id==='default'));
     assert.equal((await fetch(base+'/api/databases?connectionId=other-source',{headers})).status,404);
     assert.equal((await fetch(base+'/api/connections/connect',{method:'POST',headers})).status,501);
+    for (const url of ['/api/activity','/api/activity/users']) assert.equal((await fetch(base+url,{headers})).status,501);
+    assert.equal((await fetch(base+'/api/activity/exports',{method:'POST',headers,body:'{}'})).status,501);
   } finally { await new Promise(resolve=>server.close(resolve)); }
 });
