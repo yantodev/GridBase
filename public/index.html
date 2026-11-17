@@ -34,12 +34,12 @@
       <h1>GridBase</h1><span class="title-divider"></span><span id="project-name" class="project-name">s3tables</span>
       <span id="connection-status" class="connection-status" role="status"><span class="status-dot"></span><span id="connection-label">Checking server…</span></span>
       <button id="retry-connection" class="icon-button" type="button" title="Check connection" aria-label="Check connection"><svg><use href="#i-refresh"/></svg></button>
-      <div class="session-controls"><span id="session-user" class="session-user" aria-label="GitHub account">GitHub</span><button id="logout" class="tool-button" type="button">Keluar</button></div>
+      <div class="session-controls"><span id="session-user" class="session-user" aria-label="GitHub account">GitHub</span><button id="account-settings" class="tool-button" type="button" aria-haspopup="dialog" aria-controls="mcp-dialog" title="Account settings / MCP"><svg aria-hidden="true"><use href="#i-settings"/></svg><span>Settings</span></button><button id="logout" class="tool-button" type="button">Keluar</button></div>
     </header>
     <nav class="tool-rail" aria-label="Tool windows">
-      <button id="database-tool" class="rail-button is-active" type="button" aria-label="Database explorer" title="Database explorer" aria-controls="sidebar" aria-expanded="true"><svg><use href="#i-database"/></svg></button>
-      <button id="history-tool" class="rail-button" type="button" aria-label="Query history" title="Query history" aria-controls="sidebar" aria-expanded="false"><svg><use href="#i-history"/></svg></button>
-      <button id="activity-tool" class="rail-button" type="button" aria-label="Activity" title="Activity" aria-controls="sidebar activity-panel" aria-expanded="false"><svg><use href="#i-activity"/></svg></button>
+      <button id="database-tool" class="rail-button is-active" type="button" aria-label="DB: Database explorer" title="Database explorer" aria-controls="sidebar" aria-expanded="true"><svg aria-hidden="true"><use href="#i-database"/></svg><span>DB</span></button>
+      <button id="history-tool" class="rail-button" type="button" aria-label="History: Query history" title="Query history" aria-controls="sidebar" aria-expanded="false"><svg aria-hidden="true"><use href="#i-history"/></svg><span>History</span></button>
+      <button id="activity-tool" class="rail-button" type="button" aria-label="Logs: Activity" title="Logs / Activity" aria-controls="sidebar activity-panel" aria-expanded="false"><svg aria-hidden="true"><use href="#i-activity"/></svg><span>Logs</span></button>
     </nav>
     <button id="sidebar-backdrop" class="sidebar-backdrop" type="button" aria-label="Close tool window" hidden></button>
     <aside id="sidebar" class="sidebar" aria-label="Database explorer">
@@ -101,7 +101,7 @@
       </section>
     </main>
     <section id="activity-panel" class="activity-panel" aria-label="Riwayat aktivitas" hidden>
-      <header class="pane-heading"><h2>Activity</h2><button id="activity-refresh" class="tool-button" type="button">Muat ulang</button></header>
+      <header class="pane-heading"><h2>Logs / Activity</h2><button id="activity-refresh" class="tool-button" type="button">Muat ulang</button></header>
       <p id="activity-status" class="pane-note" role="status" aria-live="polite"></p>
       <div class="activity-table-wrap"><table id="activity-table" class="activity-table"></table></div>
       <pre id="activity-detail" class="activity-detail" aria-label="Detail aktivitas" hidden></pre>
@@ -124,16 +124,33 @@
           <label for="connection-username">Username</label><input id="connection-username" required autocomplete="username" />
           <label for="connection-password">Password</label><input id="connection-password" type="password" autocomplete="current-password" />
           <label class="checkbox-field"><input id="connection-ssl" type="checkbox" /> Use SSL</label>
+          <label class="checkbox-field"><input id="connection-mcp-read-only" type="checkbox" aria-describedby="connection-mcp-help" /> MCP read-only profile</label>
+          <p id="connection-mcp-help" class="field-help">I confirm this profile uses dedicated, externally provisioned read-only database and storage credentials (PostgreSQL, MySQL, or Spark/Hive). This declaration does not grant or verify permissions. Reconfirm after changing a profile; changed settings invalidate existing MCP grants. Workbench Disconnect does not revoke MCP access.</p>
           <p id="connection-form-status" class="form-status" role="status" aria-live="polite"></p>
         </div>
       </div>
       <div class="dialog-actions"><button id="disconnect-connection" class="tool-button" type="button" hidden>Disconnect</button><button id="test-connection" class="tool-button" type="button">Test connection</button><button id="cancel-connection" class="tool-button" type="button">Cancel</button><button id="save-connection" class="tool-button" type="button">Save</button><button id="connect-connection" class="primary-button" type="submit">Connect</button></div>
     </form>
   </dialog>
+  <dialog id="mcp-dialog" class="workbench-dialog mcp-dialog" aria-labelledby="mcp-heading">
+    <header class="dialog-heading"><div><h2 id="mcp-heading">Settings / MCP</h2><p id="mcp-account" class="dialog-subtitle"></p></div><button id="mcp-close" class="icon-button" type="button" aria-label="Close account settings"><svg aria-hidden="true"><use href="#i-close"/></svg></button></header>
+    <p class="field-help">Tokens belong to your GitHub account and allow access only to explicitly selected saved connections, even when disconnected in the workbench. Disconnect does not revoke MCP access: revoke the token to stop access. To rotate or change permissions, create a replacement token and revoke the old one.</p>
+    <p class="field-help">Read-only access requires dedicated, externally provisioned read-only database and storage credentials for every database type. A profile declaration is an operator assertion, not proof of permissions. Full access still respects each profile's read-only ceiling and database permissions; configure your AI client to request approval for writes. Editing a saved profile invalidates its existing token grants.</p>
+    <section class="mcp-client" aria-labelledby="mcp-client-heading"><h3 id="mcp-client-heading">Connect Hermes Agent / Codex CLI</h3><p class="field-help">Use Streamable HTTP with this endpoint and a bearer header. Set GRIDBASE_MCP_TOKEN in your client's environment; never save the secret in client configuration. Use HTTPS for remote access.</p><div class="mcp-endpoint-row"><code id="mcp-endpoint"></code><button id="mcp-copy-endpoint" class="text-button" type="button">Copy endpoint</button></div><pre id="mcp-client-values" class="mcp-client-values"></pre><button id="mcp-copy-values" class="text-button" type="button">Copy connection values</button></section>
+    <section id="mcp-secret-result" class="mcp-secret-result" aria-labelledby="mcp-secret-heading" hidden><h3 id="mcp-secret-heading">Copy this token now — shown only once</h3><p class="field-help">Closing settings, leaving this page, or changing accounts clears it. Keep it in a secret manager or environment variable, not browser storage.</p><code id="mcp-secret" class="mcp-secret"></code><div class="button-group"><button id="mcp-copy-secret" class="tool-button" type="button">Copy token</button><button id="mcp-discard-secret" class="tool-button" type="button">Discard token display</button></div></section>
+    <form id="mcp-form" autocomplete="off">
+      <h3>Create token</h3>
+      <fieldset id="mcp-fields" class="mcp-fields"><label for="mcp-name">Token name</label><input id="mcp-name" maxlength="80" required autocomplete="off" placeholder="Hermes on my laptop" /><div class="mcp-form-grid"><div><label for="mcp-scope">Scope</label><select id="mcp-scope"><option value="read_only" selected>Read only</option><option value="full_access">Full access (read / write)</option></select></div><div><label for="mcp-expiry">Expires in</label><select id="mcp-expiry"><option value="30" selected>30 days</option><option value="90">90 days</option><option value="365">365 days</option></select></div></div><fieldset class="mcp-connection-fieldset"><legend>Approved saved connections — select explicitly</legend><p class="field-help">Read-only tokens can select only profiles declared MCP read-only. No connections are selected automatically.</p><div id="mcp-connections" class="mcp-connections"></div></fieldset></fieldset>
+      <div class="dialog-actions"><button id="mcp-create" class="primary-button" type="submit">Create token</button></div>
+    </form>
+    <p id="mcp-status" class="form-status" role="status" aria-live="polite"></p>
+    <section aria-labelledby="mcp-tokens-heading"><div class="mcp-list-heading"><h3 id="mcp-tokens-heading">Account tokens</h3><button id="mcp-refresh" class="text-button" type="button">Refresh tokens</button></div><div id="mcp-token-list" class="mcp-token-list"></div></section>
+  </dialog>
   <dialog id="rename-dialog" class="workbench-dialog" aria-labelledby="rename-heading"><form id="rename-form"><h2 id="rename-heading">Rename console</h2><label for="console-name">Console name</label><input id="console-name" maxlength="80" required autocomplete="off" /><div class="dialog-actions"><button id="cancel-rename" class="tool-button" type="button">Cancel</button><button class="primary-button" type="submit">Save</button></div></form></dialog>
   <dialog id="row-detail" class="workbench-dialog row-detail" aria-labelledby="row-detail-heading"><header class="pane-heading"><h2 id="row-detail-heading">Row detail</h2><button id="close-row-detail" class="icon-button" type="button" aria-label="Close row detail"><svg><use href="#i-close"/></svg></button></header><div id="row-detail-table-wrap" class="row-detail-table-wrap"></div></dialog>
   <script src="/workbench-core.js" defer></script>
   <script src="/activity.js" defer></script>
+  <script src="/mcp.js" defer></script>
   <script src="/session.js" defer></script>
 </body>
 </html>

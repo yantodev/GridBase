@@ -20,7 +20,7 @@ function safeConnectionProfile(profile) {
   return {id: typeof profile.id === 'string' && /^[a-zA-Z0-9_-]{1,100}$/.test(profile.id) ? profile.id : C.newTab().id.replace('sql-', 'connection-'),
     name: profile.name.slice(0, 80), type: profile.type,
     host: String(profile.host || '').slice(0, 256), port: String(profile.port || '').slice(0, 8),
-    database: String(profile.database || '').slice(0, 256), username: String(profile.username || '').slice(0, 256), ssl: Boolean(profile.ssl), serverSaved: Boolean(profile.serverSaved)};
+    database: String(profile.database || '').slice(0, 256), username: String(profile.username || '').slice(0, 256), ssl: Boolean(profile.ssl), mcpReadOnly: profile.mcpReadOnly === true, serverSaved: Boolean(profile.serverSaved)};
 }
 function loadConnections() {
   try {
@@ -96,6 +96,7 @@ async function api(url, options = {}) {
   return data;
 }
 const activity = window.GridBaseActivity.mount({api,user:window.GridBaseSession.user,capabilities:window.GridBaseSession.capabilities});
+window.GridBaseMcp?.mount({api, user:window.GridBaseSession.user});
 function connectionType() { return $('#database-type').value; }
 function updateConnectionType() {
   const type = connectionType(), hive = type === 'hive';
@@ -129,6 +130,7 @@ function resetConnectionForm() {
   $('#connection-username').value = '';
   $('#connection-password').value = '';
   $('#connection-ssl').checked = false;
+  $('#connection-mcp-read-only').checked = false;
   $('#connection-form-status').textContent = '';
   updateConnectionType();
   $('#connection-name').focus();
@@ -144,6 +146,7 @@ function loadConnectionForm(profile) {
   $('#connection-username').value = profile.username || '';
   $('#connection-password').value = profile.password || '';
   $('#connection-ssl').checked = Boolean(profile.ssl);
+  $('#connection-mcp-read-only').checked = profile.mcpReadOnly === true;
   $('#connection-form-status').textContent = '';
   updateConnectionType();
   if (profile.jdbcUrl) $('#connection-jdbc-url').value = profile.jdbcUrl;
@@ -183,6 +186,7 @@ function connectionPayload() {
     username: $('#connection-username').value,
     password: $('#connection-password').value,
     ssl: $('#connection-ssl').checked,
+    mcpReadOnly: $('#connection-mcp-read-only').checked === true,
   };
 }
 function saveConnectionPayload(payload, connection) {
@@ -414,7 +418,8 @@ async function checkConnection() {
     for (const item of state.connections.values()) if (!live.has(item.id)) {
       item.connected = false; item.version++; item.metadataLoading = false; item.metadataLoaded = false; item.schemas = []; item.schemaEntries.clear(); item.columns.clear();
     }
-    for (const profile of data.connections) {
+    for (const item of data.connections) {
+      const profile = {...item, mcpReadOnly:item.mcpReadOnly === true};
       const previous = state.connections.get(profile.id);
       const connected = profile.connected === true;
       if (previous?.connected && connected) Object.assign(previous, profile, {serverSaved:true});
@@ -447,7 +452,7 @@ function setSidebar(tool = state.tool, open = true) {
   $('#activity-view').hidden = tool !== 'activity';
   $('.workbench').hidden = tool === 'activity';
   $('#activity-panel').hidden = tool !== 'activity';
-  $('#sidebar-heading').textContent = tool === 'database' ? 'Database' : tool === 'history' ? 'Query history' : 'Activity';
+  $('#sidebar-heading').textContent = tool === 'database' ? 'Database' : tool === 'history' ? 'Query history' : 'Logs';
   $('#sidebar').setAttribute('aria-label', $('#sidebar-heading').textContent);
   $('#refresh-metadata').hidden = tool !== 'database';
   for (const name of ['database', 'history', 'activity']) {
@@ -736,7 +741,7 @@ function configureResizer(node,horizontal) {
   });
   node.addEventListener('pointerdown',event=>{
     event.preventDefault();node.setPointerCapture(event.pointerId);document.body.classList.add('is-resizing');
-    const move=e=>{const rect=$('.workbench').getBoundingClientRect();apply(horizontal?(e.clientY-rect.top)/rect.height*100:e.clientX-42);};
+    const move=e=>{const rect=$('.workbench').getBoundingClientRect();apply(horizontal?(e.clientY-rect.top)/rect.height*100:e.clientX-$('.tool-rail').getBoundingClientRect().right);};
     const end=()=>{document.body.classList.remove('is-resizing');node.removeEventListener('pointermove',move);node.removeEventListener('pointerup',end);node.removeEventListener('pointercancel',end);};
     node.addEventListener('pointermove',move);node.addEventListener('pointerup',end);node.addEventListener('pointercancel',end);
   });
@@ -784,6 +789,7 @@ $('#connection-dialog').addEventListener('cancel',closeConnectionManager);
 $('#cancel-connection').addEventListener('click',closeConnectionManager);
 $('#new-connection').addEventListener('click',resetConnectionForm);
 $('#database-type').addEventListener('change',()=>{
+  $('#connection-mcp-read-only').checked = false;
   $('#connection-jdbc-url').value = '';
   if (['5432','3306','10000'].includes($('#connection-port').value)) $('#connection-port').value='';
   if (['postgres','mysql','default'].includes($('#connection-database').value)) $('#connection-database').value='';
@@ -792,6 +798,7 @@ $('#database-type').addEventListener('change',()=>{
 $('#test-connection').addEventListener('click',()=>requestConnection('/api/connections/test'));
 $('#save-connection').addEventListener('click',()=>requestConnection('/api/connections'));
 for (const id of ['connection-host','connection-port','connection-database','connection-ssl']) $('#' + id).addEventListener('input', updateJdbcUrl);
+for (const id of ['connection-name','connection-host','connection-port','connection-database','connection-jdbc-url','connection-username','connection-password','connection-ssl']) $('#' + id).addEventListener('input', () => { $('#connection-mcp-read-only').checked = false; });
 $('#connection-form').addEventListener('submit',event=>{event.preventDefault();requestConnection('/api/connections/connect');});
 $('#clear-history').addEventListener('click',()=>{state.history=[];saveHistory();renderHistory();});
 for(const view of ['results','output']) {

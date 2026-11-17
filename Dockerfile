@@ -7,11 +7,13 @@ FROM eclipse-temurin:17-jre-jammy AS jdbc-drivers
 ARG POSTGRESQL_JDBC_VERSION=42.7.5
 ARG MYSQL_JDBC_VERSION=9.0.0
 COPY ensure-sqlite-driver.sh /tmp/ensure-sqlite-driver.sh
+COPY ensure-mcp-deps.sh /tmp/ensure-mcp-deps.sh
 
 RUN apt-get update \
     && apt-get install --no-install-recommends --yes ca-certificates curl \
     && mkdir -p /out \
     && bash /tmp/ensure-sqlite-driver.sh /out > /dev/null \
+    && bash /tmp/ensure-mcp-deps.sh /out > /dev/null \
     && curl --fail --silent --show-error --location "https://repo1.maven.org/maven2/org/postgresql/postgresql/${POSTGRESQL_JDBC_VERSION}/postgresql-${POSTGRESQL_JDBC_VERSION}.jar" --output /out/postgresql.jar \
     && curl --fail --silent --show-error --location "https://repo1.maven.org/maven2/com/mysql/mysql-connector-j/${MYSQL_JDBC_VERSION}/mysql-connector-j-${MYSQL_JDBC_VERSION}.jar" --output /out/mysql-connector-j.jar \
     && rm -rf /var/lib/apt/lists/*
@@ -23,10 +25,11 @@ WORKDIR /src
 COPY --from=spark /opt/spark/jars/ /opt/spark/jars/
 
 COPY java-service/src /src/java-service/src
+COPY --from=jdbc-drivers /out/gson.jar /out/jsqlparser.jar /deps/
 
 RUN mkdir -p /out/java \
     && find /src/java-service/src -type f -name '*.java' -print0 \
-        | xargs -0 javac --add-modules jdk.httpserver -d /out/java
+        | xargs -0 javac --add-modules jdk.httpserver -cp '/deps/*' -d /out/java
 
 FROM eclipse-temurin:17-jre-jammy AS runtime
 
@@ -64,4 +67,4 @@ VOLUME ["/app/data"]
 HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
     CMD curl --fail --silent http://127.0.0.1:4173/healthz > /dev/null || exit 1
 
-ENTRYPOINT ["java", "--add-modules", "jdk.httpserver", "-cp", "/app/build/java:/opt/spark/jars/*:/opt/gridbase/drivers/*", "com.peentar.thriftquery.ThriftQueryServer"]
+ENTRYPOINT ["java", "--add-modules", "jdk.httpserver", "-cp", "/app/build/java:/opt/gridbase/drivers/*:/opt/spark/jars/*", "com.peentar.thriftquery.ThriftQueryServer"]

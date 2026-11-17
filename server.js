@@ -386,6 +386,9 @@ function createServer(options = {}) {
   const auth = createAuth(environment, {sendJson, securityHeaders, identify: options.identify, now: options.now});
   return http.createServer(async (request, response) => {
     const url = new URL(request.url, "http://localhost");
+    if (url.pathname === '/mcp' || url.pathname.startsWith('/mcp/') || url.pathname === '/api/mcp' || url.pathname.startsWith('/api/mcp/')) {
+      sendJson(response, 501, {error: 'MCP dan pengaturan token membutuhkan backend Java JDBC. Jalankan npm start.'}); return;
+    }
     if (await auth(request, response, url)) return;
     if (url.pathname === '/api/activity' || url.pathname.startsWith('/api/activity/')) {
       sendJson(response, 501, {error: 'Audit aktivitas membutuhkan backend Java JDBC. Jalankan npm start.'}); return;

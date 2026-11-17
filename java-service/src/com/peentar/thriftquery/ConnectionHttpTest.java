@@ -121,6 +121,7 @@ public final class ConnectionHttpTest {
         if (profile.name().equals("broken")) throw new SQLException("fixture failure");
         String type = profile.type().id();
         DatabaseMetaData metadata = proxy(DatabaseMetaData.class, (p,m,a) -> switch (m.getName()) {
+            case "getSearchStringEscape" -> "\\";
             case "getSchemas" -> rows(List.of("TABLE_SCHEM"), List.of(List.of(type + "_schema")));
             case "getCatalogs" -> rows(List.of("TABLE_CAT"), List.of(List.of(type + "_schema")));
             case "getTables" -> rows(List.of("TABLE_NAME"), List.of(List.of(type + "_table")));

@@ -30,6 +30,8 @@ public final class ThriftQueryServer {
     private final GitHubAuth auth;
     private final ActivityAudit audit;
     private final ActivityApi activity;
+    private final McpApi mcpApi;
+    private final McpServer mcp;
     private final ExecutorService executor = Executors.newFixedThreadPool(8);
     private HttpServer server;
 
@@ -47,6 +49,9 @@ public final class ThriftQueryServer {
         this.auth = auth;
         this.audit = new ActivityAudit(config);
         this.activity = new ActivityApi(audit);
+        McpTokenStore tokens = new McpTokenStore(config.dataDir);
+        this.mcpApi = new McpApi(tokens, config.auth.appUrl());
+        this.mcp = new McpServer(config, workspaces, tokens, audit.store);
     }
 
     public static void main(String[] args) throws Exception {
@@ -68,6 +73,10 @@ public final class ThriftQueryServer {
 
     void start(int port) throws IOException {
         server = HttpServer.create(new InetSocketAddress(config.host, port), 0);
+        // HttpServer contexts match prefixes: keep this browser asset out of /mcp.
+        route("/mcp.js", this::staticFiles);
+        server.createContext("/mcp", mcp::handle);
+        route("/api/mcp/tokens", (exchange, connections) -> mcpApi.handle(exchange, auth.user(exchange), connections));
         route("/api/activity", (exchange, connections) -> activity.handle(exchange, auth.user(exchange)));
         route("/api/health", this::health);
         route("/api/connections", this::connectionRoutes);
@@ -96,7 +105,7 @@ public final class ThriftQueryServer {
                 if (actual.startsWith("/api/") && user == null) {
                     sendJson(exchange, 401, error("Silakan login dengan GitHub.")); return;
                 }
-                if (!path.equals("/") && !path.equals("/api/connections") && !path.equals("/api/activity") && !actual.equals(path)) {
+                if (!path.equals("/") && !path.equals("/api/connections") && !path.equals("/api/activity") && !path.equals("/api/mcp/tokens") && !actual.equals(path)) {
                     sendJson(exchange, 404, error("Endpoint tidak ditemukan.")); return;
                 }
                 exchange.beginOperation();
@@ -104,6 +113,7 @@ public final class ThriftQueryServer {
                 ConnectionRegistry connections = user != null && profiles ? workspaces.forOwner(user.id()) : null;
                 handler.handle(exchange, connections);
             } catch (AuditStore.Unavailable unavailable) { sendJson(exchange, 503, error(unavailable.getMessage())); }
+            catch (McpTokenStore.Unavailable unavailable) { sendJson(exchange, 503, error(unavailable.getMessage())); }
             catch (ConnectionStore.StoreException unavailable) { sendJson(exchange, 503, error(unavailable.getMessage())); }
             catch (IllegalArgumentException invalid) { sendJson(exchange, 400, error("Request tidak valid.")); }
             catch (Exception failure) {
@@ -117,6 +127,7 @@ public final class ThriftQueryServer {
     void stop() {
         if (server != null) server.stop(0);
         executor.shutdownNow();
+        mcp.close();
     }
 
     private void health(HttpExchange exchange, ConnectionRegistry connections) throws IOException {

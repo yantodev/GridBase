@@ -1,6 +1,6 @@
 'use strict';
 (() => {
-  const actions = ['auth.start','auth.login','auth.logout','connection.list','connection.save','connection.test','connection.connect','connection.details','connection.disconnect','connection.delete','query.execute','metadata.databases','metadata.namespaces','metadata.tables','metadata.columns','result.export_requested'];
+  const actions = ['auth.start','auth.login','auth.logout','connection.list','connection.save','connection.test','connection.connect','connection.details','connection.disconnect','connection.delete','query.execute','metadata.databases','metadata.namespaces','metadata.tables','metadata.columns','result.export_requested','mcp.connections','token.create','token.revoke'];
   const outcomes = {pending:'Pending · hasil belum tercatat',success:'Berhasil',failure:'Gagal',denied:'Ditolak'};
   function node(tag, text) {
     const result = document.createElement(tag);
@@ -30,6 +30,7 @@
         'Mulai UTC: ' + event.startedAt, 'Selesai UTC: ' + (event.finishedAt || 'Belum tercatat'),
         'Status: ' + (outcomes[event.outcome] || event.outcome), 'HTTP: ' + (event.httpStatus ?? '—'),
         'Kode: ' + (event.code || '—'), 'Sumber: ' + event.source, 'Baris hasil: ' + (event.returnedRows ?? '—'),
+        'Token MCP: ' + (event.tokenName || '—') + ' · ' + (event.tokenId || '—'),
         'Baris terdampak: ' + (event.affectedRows ?? '—'), 'SQL fingerprint: ' + (event.sqlHash || '—'),
         'Referensi query: ' + (event.queryRequestId || '—'), 'Format ekspor: ' + (event.exportFormat || '—')
       ].join('\n') + (event.action === 'query.execute' ? '\n\nSQL:\n' + (event.sqlText ?? 'Teks SQL tidak tersedia untuk aktivitas ini.') : '');

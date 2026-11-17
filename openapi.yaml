@@ -1,13 +1,137 @@
 openapi: 3.0.3
 info:
   title: GridBase API
-  version: 1.2.0
-  description: API for querying and changing data through Java JDBC, protected by GitHub OAuth sessions. All database endpoints require the HttpOnly session cookie. POST requests use application/json and mutations must originate from APP_URL. Connection profiles persist encrypted in SQLite and belong to the verified stable numeric GitHub account ID. All connection, health, query, and metadata operations are scoped to that account. Foreign connection IDs return 404 before opening JDBC. The optional X-GridBase-Account header binds a browser tab to its expected session account; a mismatch returns 409 before any operation and never selects an owner. Startup restores profiles as disconnected, without an implicit default. Requests without an ID use the first connection connected at runtime in that account; an unknown explicit ID never falls back. Supported databases are Spark Thrift/Hive, PostgreSQL, and MySQL. Java backend persists per-account audit metadata and submitted query SQL in data/audit.sqlite, without result rows. SQL literals and comments are stored unredacted and are visible only to the activity owner or audit admins. AUDIT_ADMIN_IDS configures stable numeric GitHub audit admins without granting connection access. Database operations require a durable pending audit intent; failure returns 503 before JDBC. A completion-write failure preserves the operation response and adds X-GridBase-Audit-Warning incomplete; do not blindly retry writes. Auth audit is best effort during storage failures and logout always revokes the session. No automatic audit deletion. Node legacy returns 501 for Activity APIs.
+  version: 1.3.0
+  description: >-
+    Java JDBC APIs for Spark Thrift/Hive, PostgreSQL and MySQL. Browser database
+    and token-management APIs require the verified GitHub session cookie; /mcp
+    instead requires an account-issued bearer token and never uses cookies to
+    authenticate. JSON mutations enforce APP_URL origin protections. Browser
+    X-GridBase-Account binds a tab to its session account and is mandatory for
+    token management; it never selects another owner. Saved profiles persist
+    encrypted and restore disconnected without a default; MCP uses only explicit
+    saved-profile grants independently of Connected state. read_only requires
+    dedicated externally provisioned read-only credentials for every database
+    type plus structural SQL policy; full_access is SQL access, not app admin.
+    Profile-generation changes invalidate prior grants. Audit persists SQL text
+    including unredacted literals/comments, not result rows or bearer secrets.
+    SQL is visible only to its owner or audit admins; audit admin does not grant
+    connection access. Durable intent precedes JDBC. Final audit failures preserve
+    actual results with an incomplete warning; MCP includes requestId and
+    auditIncomplete in tool metadata. HTTP 200 can carry MCP tool failure. Never
+    automatically retry uncertain writes. No automatic audit deletion. Legacy
+    Node returns 501 for Activity, MCP and token-management APIs.
 servers:
   - url: http://127.0.0.1:4173
 security:
   - sessionCookie: []
 paths:
+  /mcp:
+    post:
+      security: [{ mcpBearer: [] }]
+      summary: Stateless MCP Streamable HTTP JSON-RPC transport
+      description: Bearer-only endpoint, never authenticated by browser cookies. Supports initialize, notifications/initialized, ping, tools/list and tools/call; no SSE/session, OAuth, resources or prompts. Versions 2025-03-26, 2025-06-18 and 2025-11-25. Tools list_connections, list_databases, list_tables, describe_table and execute_query use only explicitly granted saved profiles. read_only requires externally provisioned dedicated read-only credentials for all database types and structural SQL validation. full_access is SQL access, not application administration. JDBC calls have finite deadlines and independent row/metadata caps. Tool errors use isError even with HTTP 200; requestId/auditIncomplete are included in tool result metadata. Do not retry uncertain writes.
+      parameters:
+        - { in: header, name: MCP-Protocol-Version, schema: { type: string, enum: ['2025-03-26', '2025-06-18', '2025-11-25'] } }
+        - { in: header, name: Accept, required: true, schema: { type: string }, description: Must accept application/json and text/event-stream }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object, description: Single JSON-RPC 2.0 request or notification; duplicate keys and batches are rejected; maximum 64 KiB }
+      responses:
+        '200': { description: JSON-RPC response; inspect error or tool isError rather than HTTP status alone }
+        '202': { description: Accepted notification; no body }
+        '400': { description: Invalid transport version or forbidden query string }
+        '401': { description: 'Missing, expired or revoked bearer token' }
+        '403': { description: Invalid Origin or insecure remote transport configuration }
+        '405': { description: Only POST is supported; authenticated GET returns 405 }
+        '406': { description: Required Accept media types missing }
+        '413': { description: Request exceeds 64 KiB }
+        '415': { description: JSON content type required }
+        '503': { description: Token storage unavailable }
+    get:
+      security: [{ mcpBearer: [] }]
+      summary: Streaming is not offered
+      responses:
+        '401': { description: Bearer authentication required }
+        '405': { description: No SSE endpoint; Allow POST }
+  /api/mcp/tokens:
+    parameters:
+      - $ref: '#/components/parameters/ExpectedAccount'
+    get:
+      summary: List the session account's tokens and safe saved connection choices
+      description: X-GridBase-Account is mandatory on MCP management routes. Bearer tokens never authorize these APIs. List excludes raw tokens and database credentials.
+      responses:
+        '200':
+          description: Safe token list, saved connection choices and configured MCP endpoint
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [tokens, connections, endpoint]
+                properties:
+                  tokens: { type: array, items: { $ref: '#/components/schemas/McpToken' } }
+                  connections:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        id: { type: string }
+                        name: { type: string }
+                        type: { type: string, enum: [hive, postgresql, mysql] }
+                        mcpReadOnly: { type: boolean }
+                  endpoint: { type: string, format: uri }
+        '401': { description: Browser session required }
+        '409': { description: Missing or mismatched expected account }
+        '503': { description: Storage unavailable }
+    post:
+      summary: Create an immutable scoped token and reveal its secret once
+      description: At most 20 active tokens per account. Choose explicit saved connections. Grants bind profile generation and read-only ceiling; changed credentials/settings invalidate old grants. Response is no-store. This declaration cannot create database privileges.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [name, scope, expiresInDays, connectionIds]
+              properties:
+                name: { type: string, minLength: 1, maxLength: 80 }
+                scope: { type: string, enum: [read_only, full_access], default: read_only }
+                expiresInDays: { type: integer, enum: [30, 90, 365], default: 30 }
+                connectionIds: { type: array, minItems: 1, maxItems: 20, uniqueItems: true, items: { type: string } }
+      responses:
+        '201':
+          description: Created; secret is never returned by list endpoints
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [token, secret]
+                properties:
+                  token: { $ref: '#/components/schemas/McpToken' }
+                  secret: { type: string, description: One-time bearer secret; never persist in browser storage or logs }
+        '400': { description: 'Invalid scope, expiry, grant or active-token limit' }
+        '401': { description: Browser session required }
+        '403': { description: Origin or content type rejected }
+        '404': { description: Unknown or foreign saved profile }
+        '409': { description: Missing or mismatched expected account }
+        '503': { description: Token or audit storage unavailable }
+  /api/mcp/tokens/{id}:
+    parameters:
+      - $ref: '#/components/parameters/ExpectedAccount'
+      - { in: path, name: id, required: true, schema: { type: string, format: uuid } }
+    delete:
+      summary: Revoke a token owned by the current session account
+      description: Revocation prevents subsequent tool calls but cannot undo an in-flight database operation. Workbench Disconnect does not revoke tokens.
+      responses:
+        '200': { description: Token revoked }
+        '401': { description: Browser session required }
+        '403': { description: Origin rejected }
+        '404': { description: Token not found in this account }
+        '409': { description: Missing or mismatched expected account }
+        '503': { description: Storage unavailable }
   /api/auth/session:
     get:
       security: []
@@ -40,7 +164,7 @@ paths:
       security: []
       summary: Begin GitHub OAuth with state and PKCE S256
       responses:
-        '303': { description: Redirect to GitHub, the workspace, or login with a configuration error }
+        '303': { description: 'Redirect to GitHub, the workspace, or login with a configuration error' }
   /auth/github/callback:
     get:
       security: []
@@ -50,7 +174,7 @@ paths:
         - { in: query, name: code, schema: { type: string } }
         - { in: query, name: error, schema: { type: string } }
       responses:
-        '303': { description: Redirect to workspace on success, otherwise login with a fixed error code }
+        '303': { description: 'Redirect to workspace on success, otherwise login with a fixed error code' }
   /auth/logout:
     post:
       summary: Revoke the current session and clear its cookie
@@ -379,7 +503,7 @@ paths:
                   events: { type: array, items: { $ref: '#/components/schemas/ActivityEvent' } }
                   nextCursor: { type: string, nullable: true }
                   isAdmin: { type: boolean }
-        '400': { description: Invalid filter, cursor, or range }
+        '400': { description: 'Invalid filter, cursor, or range' }
         '401': { description: Session missing or expired }
         '403': { description: All-account scope or actor filter requires audit admin }
         '409': { description: Expected account differs from session }
@@ -459,6 +583,10 @@ components:
       description: Present only when final audit persistence failed. Original operation response is retained; pending does not mean SQL was not executed.
       schema: { type: string, enum: [incomplete] }
   securitySchemes:
+    mcpBearer:
+      type: http
+      scheme: bearer
+      description: Account-issued opaque MCP token, valid only on /mcp. Never send in a URL. Use HTTPS remotely or loopback HTTP locally.
     sessionCookie:
       type: apiKey
       in: cookie
@@ -483,9 +611,28 @@ components:
       description: Nonblank identifier without control characters. Backticks are escaped by the server.
       schema: { type: string, minLength: 1, maxLength: 256 }
   schemas:
+    McpToken:
+      type: object
+      description: Safe token metadata; no digest or bearer secret
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string }
+        prefix: { type: string }
+        scope: { type: string, enum: [read_only, full_access] }
+        createdAt: { type: integer, format: int64, description: Unix epoch milliseconds }
+        expiresAt: { type: integer, format: int64, description: Unix epoch milliseconds }
+        revokedAt: { type: integer, format: int64, nullable: true }
+        grants:
+          type: array
+          items:
+            type: object
+            properties:
+              connectionId: { type: string }
+              generation: { type: string, format: uuid }
+              readOnly: { type: boolean, description: Issuance-time policy ceiling; never silently upgraded }
     ActivityAction:
       type: string
-      enum: [auth.start, auth.login, auth.logout, connection.list, connection.save, connection.test, connection.connect, connection.details, connection.disconnect, connection.delete, query.execute, metadata.databases, metadata.namespaces, metadata.tables, metadata.columns, result.export_requested]
+      enum: [auth.start, auth.login, auth.logout, connection.list, connection.save, connection.test, connection.connect, connection.details, connection.disconnect, connection.delete, query.execute, metadata.databases, metadata.namespaces, metadata.tables, metadata.columns, result.export_requested, mcp.connections, token.create, token.revoke]
     ActivityEvent:
       type: object
       description: Append-only activity, independent of current connection profiles. Query activity includes submitted SQL text, which may contain sensitive literals and is visible only to its owner or audit admins. Pending means the outcome was not recorded, including process crashes or completion storage failures; SQL text does not prove execution succeeded.
@@ -496,7 +643,9 @@ components:
         userId: { type: string, nullable: true, description: Verified stable GitHub ID; null before identity verification }
         login: { type: string, nullable: true, description: Username snapshot at time of event }
         action: { $ref: '#/components/schemas/ActivityAction' }
-        source: { type: string, enum: [server, browser] }
+        source: { type: string, enum: [server, browser, mcp] }
+        tokenId: { type: string, nullable: true, description: Non-secret MCP token identifier }
+        tokenName: { type: string, nullable: true, description: MCP token name snapshot }
         connectionId: { type: string, nullable: true }
         sqlOperation: { type: string, nullable: true }
         sqlHash: { type: string, nullable: true, description: SHA-256 fingerprint of submitted SQL }
@@ -510,7 +659,7 @@ components:
         durationMs: { type: integer, format: int64, nullable: true, minimum: 0 }
         httpStatus: { type: integer, nullable: true }
         outcome: { type: string, enum: [pending, success, failure, denied] }
-        code: { type: string, nullable: true, description: Safe fixed AUTH code, HTTP status code, or OK; no raw exception }
+        code: { type: string, nullable: true, description: 'Safe fixed AUTH code, HTTP status code, or OK; no raw exception' }
     Connection:
       type: object
       required: [id, type, name, target, connected]
@@ -521,6 +670,7 @@ components:
         label: { type: string }
         target: { type: string, description: Redacted JDBC target without credentials }
         connected: { type: boolean }
+        mcpReadOnly: { type: boolean, default: false }
     ConnectionDetails:
       allOf:
         - $ref: '#/components/schemas/ConnectionRequest'
@@ -587,6 +737,7 @@ components:
         username: { type: string, maxLength: 256 }
         password: { type: string, maxLength: 2048, format: password }
         ssl: { type: boolean, default: false }
+        mcpReadOnly: { type: boolean, default: false, description: Owner assertion that dedicated database and storage credentials were provisioned with read-only privileges; not permission verification }
     DatabasesResponse:
       type: object
       required: [databases]
