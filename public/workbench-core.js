@@ -177,9 +177,32 @@
     });
     return rows;
   }
+  function formatDetailValue(value) {
+    const text=value==null?'NULL':String(value),json=text.trim();
+    if(!json.startsWith('{') && !json.startsWith('['))return text;
+    try { JSON.parse(text); } catch { return text; }
+    // Format original tokens: parsing and reserializing would round large numbers
+    // and could drop duplicate keys or reorder numeric object keys.
+    const parts=json.match(/"(?:\\[\s\S]|[^"\\])*"|[{}\[\],:]|[^\s{}\[\],:]+/g);
+    const out=[];let depth=0;
+    const newline=()=>out.push('\n','  '.repeat(depth));
+    parts.forEach((part,index)=>{
+      if(part==='{' || part==='[') {
+        out.push(part);depth++;
+        if(parts[index+1]!=='}' && parts[index+1]!==']')newline();
+      } else if(part==='}' || part===']') {
+        depth--;
+        if(parts[index-1]!=='{' && parts[index-1]!=='[')newline();
+        out.push(part);
+      } else if(part===',') {out.push(part);newline();}
+      else if(part===':')out.push(': ');
+      else out.push(part);
+    });
+    return out.join('');
+  }
   function toCsv(columns,rows) {
     const cell=v=>{const s=v==null?'':String(v);return /[",\r\n]/.test(s)?'"'+s.replace(/"/g,'""')+'"':s;};
     return [columns,...rows.map(r=>columns.map(c=>r[c]))].map(r=>r.map(cell).join(',')).join('\r\n');
   }
-  return {tokens,statementRanges,executionSql,mutationOperations,escapeHtml,highlightSql,formatSql,quoteIdentifier,qualifiedTable,tableSql,newTab,restoreDrafts,serializeDrafts,viewRows,toCsv,KEYWORDS};
+  return {tokens,statementRanges,executionSql,mutationOperations,escapeHtml,highlightSql,formatSql,quoteIdentifier,qualifiedTable,tableSql,newTab,restoreDrafts,serializeDrafts,viewRows,formatDetailValue,toCsv,KEYWORDS};
 });
