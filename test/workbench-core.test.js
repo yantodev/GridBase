@@ -1,6 +1,33 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const C = require('../public/workbench-core');
+test('row detail formats JSON objects and arrays without changing their values', () => {
+  for (const [value,want] of [
+    ['{"user":{"name":"Ayu","active":true},"tags":["sql","json"],"extra":null}', '{\n  "user": {\n    "name": "Ayu",\n    "active": true\n  },\n  "tags": [\n    "sql",\n    "json"\n  ],\n  "extra": null\n}'],
+    [' [ {"id":1}, [], {} ] ', '[\n  {\n    "id": 1\n  },\n  [],\n  {}\n]'],
+    ['{"id":9007199254740993,"price":1.2300e+40,"id":2,"2":0,"1":1}', '{\n  "id": 9007199254740993,\n  "price": 1.2300e+40,\n  "id": 2,\n  "2": 0,\n  "1": 1\n}'],
+    [String.raw`{"text":"a, b: [x] {y} \"quote\" \\path\nnext","html":"<script>alert(1)</script>"}`, String.raw`{
+  "text": "a, b: [x] {y} \"quote\" \\path\nnext",
+  "html": "<script>alert(1)</script>"
+}`],
+    ['{}','{}'], ['[]','[]']
+  ]) assert.equal(C.formatDetailValue(value),want);
+});
+test('row detail leaves invalid JSON, plain text, scalar values and SQL NULL unchanged', () => {
+  for (const value of ['{"broken":}', '[1,]', '{"x":1} trailing', '  ordinary text  ', '"quoted text"', '9007199254740993', 'true', 'null', '']) {
+    assert.equal(C.formatDetailValue(value),value);
+  }
+  assert.equal(C.formatDetailValue(null),'NULL');
+  assert.equal(C.formatDetailValue(undefined),'NULL');
+  assert.equal(C.formatDetailValue(42),'42');
+  assert.equal(C.formatDetailValue(false),'false');
+});
+test('row detail does not normalize invalid JSON whitespace such as NBSP or BOM', () => {
+  for (const value of ['\u00a0{"x":1}', '\ufeff[1,2]', '{"x":1}\u00a0', '[1,2]\ufeff']) {
+    assert.equal(C.formatDetailValue(value),value);
+  }
+  assert.equal(C.formatDetailValue('\t\r\n {"x":1}\t\n'),'{\n  "x": 1\n}');
+});
 test('runs only selected SQL or the statement at the caret, respecting quoted delimiters', () => {
   const sql = "-- read; safely\nSELECT 'it''s; ok', `a;b`;\nUPDATE x SET y='x'; -- tail";
   assert.match(C.executionSql(sql, 25, 25), /^-- read; safely\nSELECT/);

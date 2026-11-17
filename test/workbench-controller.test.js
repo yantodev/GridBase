@@ -119,6 +119,30 @@ test('explorer metadata, pagination, sorting/filtering, row detail and draft res
   app.context.persistDrafts();const draft=app.storage.get('thrift-query-workbench:drafts:v1:github:1001');assert.ok(draft.includes('table_1'));assert.ok(!draft.includes('rowCount'));
   const reloaded=setup({storage:app.storage});await flush();assert.equal(reloaded.read('active().source.table'),'table_1');assert.equal(reloaded.read('active().result'),undefined);assert.equal(reloaded.get('console-context').textContent,'analytics / table_1');
 });
+test('row detail prettifies JSON safely without changing grid values or query results',async()=>{
+  const app=setup();await flush();
+  const payload='{"id":9007199254740993,"nested":[{"html":"<img src=x onerror=alert(1)>"}]}';
+  const row={payload,invalid:'{"broken":}',note:'plain text',empty:null};
+  app.setQuery({...app.fixture(1),columns:Object.keys(row),rows:[row]});
+  await app.context.runQuery('SELECT payload, invalid, note, empty FROM fixture');
+  const gridRow=app.get('results-table-wrap').children[0].children[1].children[0];
+  assert.equal(gridRow.children[1].textContent,payload);
+  await gridRow.children[0].children[0].click();
+  assert.equal(app.get('row-detail').open,true);
+  const cells=()=>app.get('row-detail-table-wrap').children[0].children[0].children.map(tr=>tr.children[1]);
+  assert.equal(cells()[0].textContent,'{\n  "id": 9007199254740993,\n  "nested": [\n    {\n      "html": "<img src=x onerror=alert(1)>"\n    }\n  ]\n}');
+  assert.equal(cells()[0].children.length,0);
+  assert.equal(cells()[1].textContent,row.invalid);
+  assert.equal(cells()[2].textContent,'plain text');
+  assert.equal(cells()[3].textContent,'NULL');
+  assert.equal(cells()[3].className,'null-value');
+  assert.equal(app.read('active().result.rows[0].payload'),payload);
+  await app.get('close-row-detail').click();
+  await gridRow.emit('dblclick');
+  assert.equal(app.get('row-detail').open,true);
+  assert.equal(cells()[0].textContent.includes('\n  "nested": ['),true);
+  assert.equal(gridRow.children[1].textContent,payload);
+});
 test('in-flight results stay with their originating console and current statement selection works',async()=>{
   const app=setup();await flush();let resolve;
   app.setQuery(new Promise(r=>{resolve=r;}));

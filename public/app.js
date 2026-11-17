@@ -654,7 +654,7 @@ function renderResults() {
 }
 function openRowDetail(row,columns,index) {
   const table = element('table'), body = element('tbody');
-  columns.forEach(column => {const tr=element('tr'),th=element('th','',column);th.scope='row';tr.append(th,element('td',row[column]==null?'null-value':'',row[column]==null?'NULL':String(row[column])));body.append(tr);});
+  columns.forEach(column => {const tr=element('tr'),th=element('th','',column);th.scope='row';tr.append(th,element('td',row[column]==null?'null-value':'',C.formatDetailValue(row[column])));body.append(tr);});
   table.append(body); $('#row-detail-table-wrap').replaceChildren(table); $('#row-detail-heading').textContent = 'Row ' + index + ' · ' + active().name; $('#row-detail').showModal();
 }
 async function runQuery(explicitSql) {
