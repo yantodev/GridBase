@@ -24,7 +24,7 @@ Browser tidak menyimpan kedua nilai tersebut di localStorage.
 
 ## Login GitHub wajib
 
-Workbench dan seluruh API database memerlukan login GitHub. Membuka aplikasi tanpa sesi
+Workbench dan API database browser memerlukan login GitHub. Membuka aplikasi tanpa sesi
 akan mengarahkan pengguna ke `/login`; request API tanpa sesi mengembalikan `401`.
 Jika OAuth belum dikonfigurasi, aplikasi tetap terkunci.
 
@@ -73,11 +73,31 @@ Tema dark dengan alur inti yang mengacu pada [query consoles dan query output Da
 - **Editor:** syntax highlighting, nomor baris, indentasi Tab/Shift+Tab (Escape melepas fokus ke toolbar), Format, serta Ctrl+Space untuk saran keyword dan objek yang telah dimuat. Ctrl/Cmd+Enter menjalankan seleksi atau statement di posisi caret. Satu request tetap menjalankan satu statement.
   Query UPDATE/DELETE meminta konfirmasi sebelum dikirim, termasuk melalui shortcut dan CTE (`WITH`). Pop-up menampilkan koneksi dan SQL yang dipilih; Cancel membatalkan tanpa menghapus hasil sebelumnya. Ini pengaman UI, bukan pembatas akses API atau transaksi/rollback database.
 - **Results / Output:** hasil terikat ke console asal, termasuk saat berpindah tab selama query berjalan. Klik heading kolom untuk sort, gunakan filter untuk mencari baris yang sudah dikembalikan, lalu unduh seluruh hasil filter melalui CSV/JSON. Klik nomor baris atau klik dua kali pada baris untuk detail vertikal.
-- **Layout:** rail kiri membuka Database, History, atau Activity. Geser pembatas explorer/editor atau fokuskan pembatas lalu gunakan tombol panah, Home, dan End. Pada layar kecil explorer tampil sebagai overlay yang dapat ditutup dengan Escape.
+- **Layout:** rail kiri menampilkan label DB, History, dan Logs (Activity). Geser pembatas explorer/editor atau fokuskan pembatas lalu gunakan tombol panah, Home, dan End. Pada layar kecil explorer tampil sebagai overlay yang dapat ditutup dengan Escape.
 
 Setiap data source menampilkan status konfigurasi dan error metadata beserta retry. Status di title bar serta dialect editor mengikuti koneksi tab SQL yang aktif.
 
 Implementasi ini mempertahankan branding GridBase dan tidak memakai aset JetBrains. Pengeditan sel langsung serta pengelolaan transaksi belum termasuk; perubahan data dijalankan melalui SQL sesuai dukungan Spark dan izin akun.
+
+## MCP untuk AI
+
+Backend Java menyediakan MCP Streamable HTTP pada `/mcp` untuk Hermes Agent dan Codex CLI.
+Buka Settings / MCP pada akun yang login untuk membuat token `read_only` (default) atau
+`full_access`, memilih koneksi tersimpan, masa berlaku 30/90/365 hari, dan mencabut token.
+Token ditampilkan sekali; server hanya menyimpan hash. Bearer ini hanya berlaku di `/mcp`,
+bukan API browser atau pengelolaan akun. Log mencatat akun dan identitas token, bukan bearer.
+
+`read_only` wajib memakai profil khusus dengan izin database/storage baca untuk semua
+database: Spark/Hive, PostgreSQL, dan MySQL. Centang deklarasi MCP read-only setelah operator
+menyiapkan izin tersebut; checkbox tidak membuat atau membuktikan izin. Validasi SQL backend
+dan transaksi baca PostgreSQL/MySQL menambah pengaman, bukan jaminan bahwa semua objek/UDF
+database bebas efek samping. `full_access` tidak melewati izin database atau isolasi akun.
+
+Perubahan profil membatalkan grant token lama. Disconnect di workbench tidak mencabut MCP:
+cabut token atau hapus profil. Persetujuan write dari AI dilakukan di client AI, bukan modal
+browser. Gunakan HTTPS untuk akses jarak jauh dan jangan mengulang write yang hasilnya tidak pasti.
+
+Panduan konfigurasi client, batas SQL, deployment dan keamanan: [docs/MCP.md](./docs/MCP.md).
 
 ## Konfigurasi koneksi
 

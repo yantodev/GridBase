@@ -29,8 +29,16 @@ public final class ConnectionRegistry {
     ConnectionRegistry(ServiceFactory factory, ConnectionStore store) {
         this.factory = factory;
         this.store = store;
-        if (store != null) store.load().forEach((id, settings) ->
-                entries.put(id, new Entry(id, settings, factory.create(settings.profile()), false)));
+        synchronized (ConnectionStore.class) {
+            if (store != null) store.load().forEach((id, settings) -> {
+                ConnectionSettings saved = settings;
+                if (saved.generation() == null) {
+                    saved = saved.withGeneration(UUID.randomUUID().toString());
+                    store.save(id, saved); // Persist a legacy generation before it can authorize any token.
+                }
+                entries.put(id, new Entry(id, saved, factory.create(saved.profile()), false));
+            });
+        }
     }
 
     public void test(ConnectionProfile profile) throws SQLException, ClassNotFoundException {
@@ -48,8 +56,9 @@ public final class ConnectionRegistry {
         service.testConnection(); // Failed reconnects preserve the previous working profile.
         synchronized (this) {
             checkCapacity(id);
-            if (store != null) store.save(id, settings);
-            Entry entry = new Entry(id, settings, service, true);
+            ConnectionSettings saved = versioned(id, settings);
+            if (store != null) store.save(id, saved);
+            Entry entry = new Entry(id, saved, service, true);
             entries.put(id, entry);
             if (defaultId == null) defaultId = id;
             return entry;
@@ -78,8 +87,9 @@ public final class ConnectionRegistry {
         checkWritable(id);
         checkCapacity(id);
         JdbcService service = factory.create(settings.profile());
-        if (store != null) store.save(id, settings);
-        Entry entry = new Entry(id, settings, service, false);
+        ConnectionSettings saved = versioned(id, settings);
+        if (store != null) store.save(id, saved);
+        Entry entry = new Entry(id, saved, service, false);
         entries.put(id, entry);
         if (id.equals(defaultId)) defaultId = null;
         return entry;
@@ -89,6 +99,27 @@ public final class ConnectionRegistry {
         Entry entry = entries.get(id);
         if (entry == null) throw new UnknownConnectionException();
         return entry.settings();
+    }
+
+    /** Explicit saved-profile lookup. Workbench defaults and Connected status never authorize MCP. */
+    public synchronized McpProfile mcp(String id) {
+        Entry entry = id == null || id.isBlank() ? null : entries.get(id);
+        if (entry == null) throw new UnknownConnectionException();
+        ConnectionSettings settings = entry.settings();
+        if (store != null) {
+            ConnectionSettings saved = store.load().get(id);
+            if (saved == null || !settings.equals(saved)) throw new UnknownConnectionException();
+        }
+        if (!ConnectionSettings.validGeneration(settings.generation())) throw new IllegalStateException("Profile generation unavailable");
+        return new McpProfile(id, settings.generation(), settings.mcpReadOnly(), entry.service());
+    }
+
+    private ConnectionSettings versioned(String id, ConnectionSettings settings) {
+        Entry previous = entries.get(id);
+        ConnectionSettings prior = store == null ? previous == null ? null : previous.settings() : store.load().get(id);
+        String generation = settings.sameSettings(prior) && ConnectionSettings.validGeneration(prior.generation())
+                ? prior.generation() : UUID.randomUUID().toString();
+        return settings.withGeneration(generation);
     }
 
     public synchronized void delete(String id) {
@@ -121,8 +152,13 @@ public final class ConnectionRegistry {
     public record Entry(String id, ConnectionSettings settings, JdbcService service, boolean connected) {
         public String toJson() {
             String profile = service.profile().safeJson();
-            return "{\"id\":" + JsonUtil.quote(id) + ",\"connected\":" + connected + "," + profile.substring(1);
+            return "{\"id\":" + JsonUtil.quote(id) + ",\"connected\":" + connected
+                    + ",\"mcpReadOnly\":" + settings.mcpReadOnly() + "," + profile.substring(1);
         }
+    }
+
+    public record McpProfile(String id, String generation, boolean readOnly, JdbcService service) {
+        @Override public String toString() { return "McpProfile[id=" + id + ",generation=" + generation + ",readOnly=" + readOnly + "]"; }
     }
 
     public static final class UnknownConnectionException extends RuntimeException {

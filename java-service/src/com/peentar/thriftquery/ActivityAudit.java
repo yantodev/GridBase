@@ -31,7 +31,9 @@ final class ActivityAudit {
             case "/api/tables" -> "metadata.tables";
             case "/api/columns" -> "metadata.columns";
             case "/api/activity/exports" -> "result.export_requested";
-            default -> path.matches("/api/connections/[a-zA-Z0-9_-]{1,100}")
+            case "/api/mcp/tokens" -> method.equals("POST") ? "token.create" : method.equals("DELETE") ? "token.revoke" : null;
+            default -> method.equals("DELETE") && path.matches("/api/mcp/tokens/[a-zA-Z0-9_-]{1,100}") ? "token.revoke"
+                    : path.matches("/api/connections/[a-zA-Z0-9_-]{1,100}")
                     ? (method.equals("DELETE") ? "connection.delete" : "connection.details") : null;
         };
     }

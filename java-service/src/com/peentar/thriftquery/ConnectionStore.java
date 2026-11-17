@@ -68,7 +68,7 @@ public final class ConnectionStore {
                 while (rows.next()) {
                     String id = rows.getString(1);
                     if (!id.matches("[a-zA-Z0-9_-]{1,100}")) throw new StoreException();
-                    settings.put(id, ConnectionSettings.fromJson(decrypt(aad(id), rows.getBytes(2))));
+                    settings.put(id, ConnectionSettings.fromStoredJson(decrypt(aad(id), rows.getBytes(2))));
                 }
             }
             return settings;
