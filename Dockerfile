@@ -29,7 +29,7 @@ COPY --from=jdbc-drivers /out/gson.jar /out/jsqlparser.jar /deps/
 
 RUN mkdir -p /out/java \
     && find /src/java-service/src -type f -name '*.java' -print0 \
-        | xargs -0 javac --add-modules jdk.httpserver -cp '/deps/*' -d /out/java
+        | xargs -0 javac --release 17 --add-modules jdk.httpserver -cp '/deps/*' -d /out/java
 
 FROM eclipse-temurin:17-jre-jammy AS runtime
 

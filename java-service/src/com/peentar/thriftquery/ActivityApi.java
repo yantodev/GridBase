@@ -7,11 +7,11 @@ import java.util.Set;
 final class ActivityApi {
     private final ActivityAudit audit;
     ActivityApi(ActivityAudit audit) { this.audit = audit; }
-    void handle(HttpExchange exchange, GitHubAuth.User actor) throws IOException {
+    void handle(HttpExchange exchange, Actor actor) throws IOException {
         String path = exchange.getRequestURI().getPath(), method = exchange.getRequestMethod();
         try {
             if (path.equals("/api/activity") && method.equals("GET")) {
-                ThriftQueryServer.sendJson(exchange, 200, audit.store.list(actor.id(), audit.admin(actor), GitHubAuth.params(exchange.getRequestURI().getRawQuery())).toJson());
+                ThriftQueryServer.sendJson(exchange, 200, audit.store.list(actor.ownerKey(), audit.admin(actor), GitHubAuth.params(exchange.getRequestURI().getRawQuery())).toJson());
             } else if (path.equals("/api/activity/users") && method.equals("GET")) {
                 if (!audit.admin(actor)) throw new AuditStore.Forbidden();
                 ThriftQueryServer.sendJson(exchange, 200, audit.store.users());
@@ -20,7 +20,7 @@ final class ActivityApi {
                 String reference = JsonUtil.stringField(body, "queryRequestId"), format = JsonUtil.stringField(body, "format");
                 long rows = JsonUtil.nonnegativeLongField(body, "rowCount");
                 if (!Set.of("csv", "json").contains(format)) throw new IllegalArgumentException();
-                AuditStore.Event query = audit.store.ownedQuery(reference, actor.id());
+                AuditStore.Event query = audit.store.ownedQuery(reference, actor.ownerKey());
                 if (query == null) { jsonError(exchange, 404, "Eksekusi query tidak ditemukan."); return; }
                 if (query.returnedRows == null || rows > query.returnedRows) throw new IllegalArgumentException();
                 ActivityAudit.export(exchange, query, format, rows);

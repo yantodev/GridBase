@@ -1,8 +1,6 @@
 package com.peentar.thriftquery;
 
-import java.nio.file.Files;
 import java.nio.file.Path;
-import java.nio.file.attribute.PosixFilePermissions;
 import java.sql.Connection;
 import java.sql.DriverManager;
 import java.sql.PreparedStatement;
@@ -28,13 +26,7 @@ final class AuditStore {
         synchronized (AuditStore.class) {
             try {
                 Class.forName("org.sqlite.JDBC");
-                Files.createDirectories(database.getParent());
-                restrict(database.getParent(), "rwx------");
-                if (!Files.exists(database)) {
-                    if (database.getFileSystem().supportedFileAttributeViews().contains("posix")) Files.createFile(database, PosixFilePermissions.asFileAttribute(PosixFilePermissions.fromString("rw-------")));
-                    else Files.createFile(database);
-                }
-                restrict(database, "rw-------");
+                PrivateFiles.database(database);
                 try (var db = open(); var sql = db.createStatement()) {
                     int schema;
                     try (var version = sql.executeQuery("PRAGMA user_version")) { schema = version.next() ? version.getInt(1) : -1; }
@@ -91,14 +83,15 @@ final class AuditStore {
     }
 
     Page list(String ownerId, boolean admin, Map<String, String> filters) {
-        GitHubAuth.validId(ownerId);
+        Actor.validOwnerKey(ownerId);
+        admin = admin && !ownerId.startsWith("local:"); // Server audit administrator IDs are GitHub-only.
         if (!FILTERS.containsAll(filters.keySet())) throw new IllegalArgumentException("Filter aktivitas tidak dikenal.");
         String scope = filters.getOrDefault("scope", "mine");
         if (!scope.equals("mine") && !scope.equals("all")) throw new IllegalArgumentException("Scope aktivitas tidak valid.");
         if ((scope.equals("all") || filters.containsKey("userId")) && !admin) throw new Forbidden();
         if (filters.containsKey("userId") && !scope.equals("all")) throw new IllegalArgumentException("Filter akun memerlukan scope seluruh pengguna.");
         String actor = scope.equals("mine") ? ownerId : filters.get("userId");
-        if (actor != null) GitHubAuth.validId(actor);
+        if (actor != null) Actor.validOwnerKey(actor);
         int limit = filters.containsKey("limit") ? (int) positive(filters.get("limit"), 100) : 50;
         List<Object> values = new ArrayList<>(); StringBuilder where = new StringBuilder(" WHERE 1=1");
         if (actor != null) condition(where, values, "user_id=?", actor);
@@ -124,7 +117,7 @@ final class AuditStore {
 
     Event ownedQuery(String requestId, String ownerId) {
         if (requestId == null || !requestId.matches("[0-9a-f-]{36}")) return null;
-        GitHubAuth.validId(ownerId);
+        Actor.validOwnerKey(ownerId);
         try (var db = open(); var sql = db.prepareStatement("SELECT * FROM audit_events WHERE request_id=? AND user_id=? AND action='query.execute' AND outcome='success'")) {
             sql.setString(1, requestId); sql.setString(2, ownerId);
             try (var rows = sql.executeQuery()) { return rows.next() ? read(rows) : null; }
@@ -148,11 +141,21 @@ final class AuditStore {
     }
     private static void validate(Event event) {
         if (!event.requestId.matches("[0-9a-f-]{36}") || !ACTIONS.contains(event.action) || !OUTCOMES.contains(event.outcome)) throw new IllegalArgumentException("Invalid audit event");
-        if (event.userId != null) new GitHubAuth.User(event.userId, event.login);
-        else if (event.login != null) throw new IllegalArgumentException("Unverified actor");
+        Actor actor = event.userId == null ? null : Actor.fromOwnerKey(event.userId, event.login);
+        if (actor == null && event.login != null) throw new IllegalArgumentException("Unverified actor");
         if ("mcp".equals(event.source)) {
             if (!MCP_ACTIONS.contains(event.action) || event.userId == null || event.tokenId == null || event.tokenName == null) throw new IllegalArgumentException("Invalid MCP audit identity or action");
-        } else if (event.action.equals("mcp.connections") || !(event.action.equals("result.export_requested") ? "browser".equals(event.source) : "server".equals(event.source))) throw new IllegalArgumentException("Invalid event source");
+        } else {
+            boolean localSource = "desktop".equals(event.source) || "vscode".equals(event.source);
+            boolean localActor = actor != null && actor.provider().equals("local");
+            if (event.action.equals("mcp.connections")) throw new IllegalArgumentException("Invalid event source");
+            if (localSource) {
+                if (!localActor) throw new IllegalArgumentException("Local source requires a local actor");
+            } else {
+                String expectedSource = event.action.equals("result.export_requested") ? "browser" : "server";
+                if (localActor || !expectedSource.equals(event.source)) throw new IllegalArgumentException("Invalid event source");
+            }
+        }
         if ((event.tokenId == null) != (event.tokenName == null)
                 || event.tokenId != null && (!event.tokenId.matches("[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}") || event.tokenName.isBlank() || event.tokenName.length() > 100 || event.tokenName.codePoints().anyMatch(Character::isISOControl)
                     || !("mcp".equals(event.source) || Set.of("token.create", "token.revoke").contains(event.action)))) throw new IllegalArgumentException("Invalid token audit identity");
@@ -171,12 +174,12 @@ final class AuditStore {
     }
     private static Long nullableLong(ResultSet rows, String name) throws Exception { long value = rows.getLong(name); return rows.wasNull() ? null : value; }
     private Connection open() throws Exception {
-        Connection db = DriverManager.getConnection("jdbc:sqlite:" + database);
+        PrivateFiles.databaseExisting(database);
+        Connection db = DriverManager.getConnection("jdbc:sqlite:" + database, PrivateFiles.sqliteExistingOptions());
         try (var sql = db.createStatement()) { sql.execute("PRAGMA busy_timeout=5000"); sql.execute("PRAGMA synchronous=FULL"); }
         catch (Exception error) { db.close(); throw error; }
         return db;
     }
-    private static void restrict(Path path, String mode) throws Exception { if (path.getFileSystem().supportedFileAttributeViews().contains("posix")) Files.setPosixFilePermissions(path, PosixFilePermissions.fromString(mode)); }
 
     static final class Event {
         long id, startedAt = System.currentTimeMillis();
@@ -184,8 +187,9 @@ final class AuditStore {
         Long finishedAt, durationMs, returnedRows, affectedRows;
         Integer httpStatus;
         private Event() { }
-        Event(GitHubAuth.User actor, String action, String source) { this.action = action; this.source = source; actor(actor); }
-        void actor(GitHubAuth.User actor) { userId = actor == null ? null : actor.id(); login = actor == null ? null : actor.login(); }
+        Event(GitHubAuth.User actor, String action, String source) { this(actor == null ? null : actor.toActor(), action, source); }
+        Event(Actor actor, String action, String source) { this.action = action; this.source = source; actor(actor); }
+        void actor(Actor actor) { userId = actor == null ? null : actor.ownerKey(); login = actor == null ? null : actor.login(); }
         String toJson() {
             return "{\"sqlText\":" + JsonUtil.quote(sqlText) + ",\"id\":" + JsonUtil.quote(Long.toString(id)) + ",\"requestId\":" + JsonUtil.quote(requestId) + ",\"userId\":" + JsonUtil.quote(userId) + ",\"login\":" + JsonUtil.quote(login) + ",\"action\":" + JsonUtil.quote(action) + ",\"source\":" + JsonUtil.quote(source) + ",\"tokenId\":" + JsonUtil.quote(tokenId) + ",\"tokenName\":" + JsonUtil.quote(tokenName) + ",\"connectionId\":" + JsonUtil.quote(connectionId) + ",\"sqlOperation\":" + JsonUtil.quote(sqlOperation) + ",\"sqlHash\":" + JsonUtil.quote(sqlHash) + ",\"queryRequestId\":" + JsonUtil.quote(queryRequestId) + ",\"exportFormat\":" + JsonUtil.quote(exportFormat) + ",\"returnedRows\":" + returnedRows + ",\"affectedRows\":" + affectedRows + ",\"startedAt\":" + JsonUtil.quote(Instant.ofEpochMilli(startedAt).toString()) + ",\"finishedAt\":" + (finishedAt == null ? "null" : JsonUtil.quote(Instant.ofEpochMilli(finishedAt).toString())) + ",\"durationMs\":" + durationMs + ",\"httpStatus\":" + httpStatus + ",\"outcome\":" + JsonUtil.quote(outcome) + ",\"code\":" + JsonUtil.quote(code) + "}";
         }
@@ -193,6 +197,6 @@ final class AuditStore {
     record Page(List<Event> events, String nextCursor, boolean isAdmin) {
         String toJson() { return "{\"events\":[" + events.stream().map(Event::toJson).collect(java.util.stream.Collectors.joining(",")) + "],\"nextCursor\":" + JsonUtil.quote(nextCursor) + ",\"isAdmin\":" + isAdmin + "}"; }
     }
-    static final class Unavailable extends RuntimeException { Unavailable() { super("Penyimpanan aktivitas tidak tersedia. Periksa volume data."); } }
+    static final class Unavailable extends RuntimeException { Unavailable() { super("Penyimpanan aktivitas tidak tersedia. Periksa izin privat volume data dan hindari tautan berkas."); } }
     static final class Forbidden extends RuntimeException { Forbidden() { super("Riwayat seluruh akun hanya dapat diakses admin audit."); } }
 }

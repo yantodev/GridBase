@@ -12,8 +12,16 @@ final class ActivityAudit {
     final AuditStore store;
     private final Set<String> admins;
     ActivityAudit(AppConfig config) { store = new AuditStore(config.dataDir); admins = config.auditAdminIds; }
-    boolean admin(GitHubAuth.User actor) { return actor != null && admins.contains(actor.id()); }
-    Exchange wrap(HttpExchange exchange, GitHubAuth.User actor) { return new Exchange(exchange, actor); }
+    boolean admin(Actor actor) { return actor != null && actor.provider().equals("github") && admins.contains(actor.ownerKey()); }
+    Exchange wrap(HttpExchange exchange, GitHubAuth.User actor) { return wrap(exchange, actor == null ? null : actor.toActor()); }
+    Exchange wrap(HttpExchange exchange, Actor actor) {
+        return new Exchange(exchange, actor, actor != null && actor.provider().equals("local") ? "desktop" : null);
+    }
+    Exchange wrap(HttpExchange exchange, Actor actor, String localSource) {
+        if (actor == null || !actor.provider().equals("local") || !("desktop".equals(localSource) || "vscode".equals(localSource)))
+            throw new IllegalArgumentException("Local audit source requires a local actor");
+        return new Exchange(exchange, actor, localSource);
+    }
 
     private static String action(HttpExchange exchange) {
         String path = exchange.getRequestURI().getPath(), method = exchange.getRequestMethod();
@@ -37,7 +45,7 @@ final class ActivityAudit {
                     ? (method.equals("DELETE") ? "connection.delete" : "connection.details") : null;
         };
     }
-    static void actor(HttpExchange exchange, GitHubAuth.User actor) {
+    static void actor(HttpExchange exchange, Actor actor) {
         if (exchange instanceof ActivityAudit.Exchange audited && audited.event != null) audited.event.actor(actor);
     }
     static String requestId(HttpExchange exchange) { return ((ActivityAudit.Exchange) exchange).requestId; }
@@ -74,10 +82,11 @@ final class ActivityAudit {
         final String requestId;
         private final long startedNanos = System.nanoTime();
         private boolean begun, completed, disabled;
-        Exchange(HttpExchange delegate, GitHubAuth.User actor) {
+        Exchange(HttpExchange delegate, Actor actor, String localSource) {
             this.delegate = delegate;
             String action = action(delegate);
-            event = action == null ? null : new AuditStore.Event("auth.login".equals(action) ? null : actor, action, action.equals("result.export_requested") ? "browser" : "server");
+            event = action == null ? null : new AuditStore.Event("auth.login".equals(action) && localSource == null ? null : actor, action,
+                    localSource != null ? localSource : action.equals("result.export_requested") ? "browser" : "server");
             requestId = event == null ? UUID.randomUUID().toString() : event.requestId;
         }
         void beginOperation() {

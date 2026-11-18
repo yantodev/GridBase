@@ -1,9 +1,6 @@
 package com.peentar.thriftquery;
 
-import java.nio.file.Files;
-import java.nio.file.LinkOption;
 import java.nio.file.Path;
-import java.nio.file.attribute.PosixFilePermissions;
 import java.sql.Connection;
 import java.sql.DriverManager;
 import java.sql.ResultSet;
@@ -33,14 +30,7 @@ final class McpTokenStore {
         synchronized (McpTokenStore.class) {
             try {
                 Class.forName("org.sqlite.JDBC");
-                Files.createDirectories(database.getParent());
-                if (Files.isSymbolicLink(database.getParent()) || Files.isSymbolicLink(database)) throw new Unavailable();
-                restrict(database.getParent(), "rwx------");
-                if (!Files.exists(database, LinkOption.NOFOLLOW_LINKS)) {
-                    Files.createFile(database, PosixFilePermissions.asFileAttribute(PosixFilePermissions.fromString("rw-------")));
-                }
-                if (!Files.isRegularFile(database, LinkOption.NOFOLLOW_LINKS)) throw new Unavailable();
-                restrict(database, "rw-------");
+                PrivateFiles.database(database);
                 try (Connection db = open(true); var sql = db.createStatement()) {
                     int version;
                     try (var rows = sql.executeQuery("PRAGMA user_version")) { version = rows.next() ? rows.getInt(1) : -1; }
@@ -64,6 +54,10 @@ final class McpTokenStore {
     }
 
     Created create(GitHubAuth.User user, String name, String scope, int expiresInDays, List<Grant> grants) {
+        return create(user == null ? null : user.toActor(), name, scope, expiresInDays, grants);
+    }
+
+    Created create(Actor user, String name, String scope, int expiresInDays, List<Grant> grants) {
         if (user == null) throw new IllegalArgumentException("Verified owner required");
         validateName(name);
         validateScope(scope);
@@ -73,14 +67,14 @@ final class McpTokenStore {
         RANDOM.nextBytes(random);
         String secret = "gb_mcp_" + Base64.getUrlEncoder().withoutPadding().encodeToString(random);
         long now = clock.getAsLong();
-        Token token = new Token(UUID.randomUUID().toString(), user.id(), user.login(), name,
+        Token token = new Token(UUID.randomUUID().toString(), user.ownerKey(), user.login(), name,
                 secret.substring(0, 15), scope, grants, now, Math.addExact(now, Math.multiplyExact((long) expiresInDays, 86_400_000L)), null);
         synchronized (McpTokenStore.class) {
             try (Connection db = open()) {
                 // Acquire SQLite's write lock before counting: the limit is atomic across store instances/processes.
                 try (var sql = db.createStatement()) { sql.execute("BEGIN IMMEDIATE"); }
                 try (var sql = db.prepareStatement("SELECT count(*) FROM tokens WHERE owner_id=? AND revoked_at IS NULL AND expires_at>?")) {
-                    sql.setString(1, user.id()); sql.setLong(2, now);
+                    sql.setString(1, user.ownerKey()); sql.setLong(2, now);
                     try (var rows = sql.executeQuery()) {
                         if (!rows.next()) throw new Unavailable();
                         if (rows.getInt(1) >= 20) throw new IllegalArgumentException("Maksimal 20 token MCP aktif per akun.");
@@ -115,7 +109,7 @@ final class McpTokenStore {
     }
 
     List<Token> list(String ownerId) {
-        GitHubAuth.validId(ownerId);
+        Actor.validOwnerKey(ownerId);
         try (Connection db = open(); var sql = db.prepareStatement("SELECT * FROM tokens WHERE owner_id=? ORDER BY created_at DESC,rowid DESC")) {
             sql.setString(1, ownerId);
             List<Token> tokens = new ArrayList<>();
@@ -125,7 +119,7 @@ final class McpTokenStore {
     }
 
     void revoke(String ownerId, String tokenId) {
-        GitHubAuth.validId(ownerId);
+        Actor.validOwnerKey(ownerId);
         if (tokenId == null || !ConnectionSettings.validGeneration(tokenId)) throw new IllegalArgumentException("Invalid token ID");
         try (Connection db = open(); var sql = db.prepareStatement("UPDATE tokens SET revoked_at=? WHERE id=? AND owner_id=? AND revoked_at IS NULL")) {
             sql.setLong(1, clock.getAsLong()); sql.setString(2, tokenId); sql.setString(3, ownerId);
@@ -168,7 +162,7 @@ final class McpTokenStore {
                  long createdAt, long expiresAt, Long revokedAt) {
         Token {
             if (!ConnectionSettings.validGeneration(id)) throw new IllegalArgumentException("Invalid token ID");
-            new GitHubAuth.User(ownerId, login);
+            Actor.fromOwnerKey(ownerId, login);
             validateName(name);
             validateScope(scope);
             if (prefix == null || !prefix.matches("gb_mcp_[A-Za-z0-9_-]{8}")) throw new IllegalArgumentException("Invalid safe token prefix");
@@ -213,10 +207,8 @@ final class McpTokenStore {
     }
 
     private Connection open(boolean initializing) throws Exception {
-        if (!Files.isRegularFile(database, LinkOption.NOFOLLOW_LINKS)) throw new Unavailable();
-        restrict(database.getParent(), "rwx------");
-        restrict(database, "rw-------");
-        Connection db = DriverManager.getConnection("jdbc:sqlite:" + database);
+        PrivateFiles.databaseExisting(database);
+        Connection db = DriverManager.getConnection("jdbc:sqlite:" + database, PrivateFiles.sqliteExistingOptions());
         try (var sql = db.createStatement()) {
             if (!initializing) {
                 try (var rows = sql.executeQuery("PRAGMA user_version")) {
@@ -231,12 +223,7 @@ final class McpTokenStore {
         return db;
     }
 
-    private static void restrict(Path path, String mode) throws Exception {
-        // A non-private filesystem is not suitable for bearer credential storage.
-        Files.setPosixFilePermissions(path, PosixFilePermissions.fromString(mode));
-    }
-
     static final class Unavailable extends RuntimeException {
-        Unavailable() { super("Penyimpanan token MCP tidak tersedia. Periksa volume data."); }
+        Unavailable() { super("Penyimpanan token MCP tidak tersedia. Periksa izin privat volume data dan hindari tautan berkas."); }
     }
 }

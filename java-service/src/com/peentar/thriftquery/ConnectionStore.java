@@ -2,12 +2,12 @@ package com.peentar.thriftquery;
 
 import javax.crypto.Cipher;
 import javax.crypto.spec.GCMParameterSpec;
-import javax.crypto.spec.SecretKeySpec;
+import javax.crypto.SecretKey;
 import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.nio.file.attribute.PosixFilePermissions;
+import java.nio.file.LinkOption;
 import java.security.SecureRandom;
 import java.sql.Connection;
 import java.sql.DriverManager;
@@ -18,31 +18,56 @@ import java.util.Map;
 public final class ConnectionStore {
     private static final SecureRandom RANDOM = new SecureRandom();
     private final Path database;
-    private final SecretKeySpec key;
+    private final SecretKey key;
+    private final CredentialKey localKey;
     private final String ownerId;
 
+    ConnectionStore(Path directory, Actor actor) { this(directory, java.util.Objects.requireNonNull(actor).ownerKey()); }
+
     public ConnectionStore(Path directory, String ownerId) {
-        this.ownerId = GitHubAuth.validId(ownerId);
+        this(directory, ownerId, null, false);
+    }
+
+    ConnectionStore(Path directory, Actor actor, CredentialKey key) {
+        this(directory, java.util.Objects.requireNonNull(actor).ownerKey(), key, true);
+    }
+
+    private ConnectionStore(Path directory, String ownerId, CredentialKey suppliedKey, boolean local) {
+        this.ownerId = Actor.validOwnerKey(ownerId);
+        this.localKey = local ? suppliedKey : null;
         synchronized (ConnectionStore.class) {
             database = directory.toAbsolutePath().normalize().resolve("gridbase.sqlite");
             Path keyFile = database.resolveSibling("credentials.key");
             try {
                 Class.forName("org.sqlite.JDBC");
-                Files.createDirectories(database.getParent());
-                restrict(database.getParent(), "rwx------");
-                if (!Files.exists(keyFile)) {
-                    if (Files.exists(database)) throw new StoreException();
-                    byte[] generated = new byte[32];
-                    RANDOM.nextBytes(generated);
-                    createPrivateFile(keyFile);
-                    Files.write(keyFile, generated);
+                PrivateFiles.createDirectory(database.getParent());
+                PrivateFiles.databasePaths(database); // Permission errors must not generate or change key material.
+                if (local) {
+                    if (!LocalWorkspace.validate(database.getParent(), suppliedKey).ownerKey().equals(this.ownerId)) throw new StoreException();
+                    key = suppliedKey.secretKey();
+                } else {
+                    if (Files.exists(database.resolveSibling("local-workspace.json"), LinkOption.NOFOLLOW_LINKS)) throw new StoreException();
+                    if (!Files.exists(keyFile, LinkOption.NOFOLLOW_LINKS)) {
+                        if (Files.exists(database, LinkOption.NOFOLLOW_LINKS)) throw new StoreException();
+                        byte[] generated = new byte[32];
+                        RANDOM.nextBytes(generated);
+                        try (var channel = PrivateFiles.createNewFile(keyFile)) {
+                            var bytes = ByteBuffer.wrap(generated);
+                            while (bytes.hasRemaining()) channel.write(bytes);
+                            channel.force(true);
+                        }
+                    }
+                    PrivateFiles.createFileExisting(keyFile);
+                    byte[] bytes;
+                    try (var channel = java.nio.channels.FileChannel.open(keyFile, java.nio.file.StandardOpenOption.READ, LinkOption.NOFOLLOW_LINKS)) {
+                        var buffer = ByteBuffer.allocate(33);
+                        while (buffer.hasRemaining() && channel.read(buffer) != -1) { }
+                        if (buffer.position() != 32) throw new StoreException();
+                        bytes = java.util.Arrays.copyOf(buffer.array(), 32);
+                    }
+                    key = new CredentialKey(bytes).secretKey();
                 }
-                restrict(keyFile, "rw-------");
-                byte[] bytes = Files.readAllBytes(keyFile);
-                if (bytes.length != 32) throw new StoreException();
-                key = new SecretKeySpec(bytes, "AES");
-                if (!Files.exists(database)) createPrivateFile(database);
-                restrict(database, "rw-------");
+                PrivateFiles.database(database);
                 try (Connection connection = open(); var statement = connection.createStatement()) {
                     try (var version = statement.executeQuery("PRAGMA user_version")) {
                         if (version.next() && version.getInt(1) > 2) throw new StoreException();
@@ -102,6 +127,7 @@ public final class ConnectionStore {
 
     /** Trusted startup migration only. Old ciphertext uses connection-ID AAD. */
     public static void migrateLegacy(Path directory, String targetOwner) {
+        GitHubAuth.validId(targetOwner); // Legacy assignment remains a GitHub-only startup operation.
         ConnectionStore store = new ConnectionStore(directory, targetOwner);
         synchronized (ConnectionStore.class) {
             try (Connection connection = store.open()) {
@@ -131,7 +157,9 @@ public final class ConnectionStore {
     private String aad(String id) { return ownerId + "\0" + id; }
 
     private Connection open() throws Exception {
-        Connection connection = DriverManager.getConnection("jdbc:sqlite:" + database);
+        if (localKey != null && !LocalWorkspace.validate(database.getParent(), localKey).ownerKey().equals(ownerId)) throw new StoreException();
+        PrivateFiles.databaseExisting(database);
+        Connection connection = DriverManager.getConnection("jdbc:sqlite:" + database, PrivateFiles.sqliteExistingOptions());
         try (var statement = connection.createStatement()) {
             statement.execute("PRAGMA busy_timeout=5000");
         } catch (Exception error) { connection.close(); throw error; }
@@ -160,19 +188,7 @@ public final class ConnectionStore {
         return cipher;
     }
 
-    private static void createPrivateFile(Path path) throws Exception {
-        if (path.getFileSystem().supportedFileAttributeViews().contains("posix")) {
-            Files.createFile(path, PosixFilePermissions.asFileAttribute(PosixFilePermissions.fromString("rw-------")));
-        } else Files.createFile(path);
-    }
-
-    private static void restrict(Path path, String permissions) throws Exception {
-        if (path.getFileSystem().supportedFileAttributeViews().contains("posix")) {
-            Files.setPosixFilePermissions(path, PosixFilePermissions.fromString(permissions));
-        }
-    }
-
     public static final class StoreException extends RuntimeException {
-        StoreException() { super("Penyimpanan konfigurasi tidak tersedia. Periksa volume data dan credentials.key."); }
+        StoreException() { super("Penyimpanan konfigurasi tidak tersedia. Periksa izin privat volume data dan kunci kredensial; jangan ganti data atau kunci yang ada."); }
     }
 }

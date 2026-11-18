@@ -17,6 +17,10 @@ final class McpAudit {
 
     /** Only nonsecret token ID/name snapshots belong here, never a bearer token. */
     Operation start(GitHubAuth.User actor, String tokenId, String tokenName, String action, String connectionId, String sql) {
+        return start(actor == null ? null : actor.toActor(), tokenId, tokenName, action, connectionId, sql);
+    }
+
+    Operation start(Actor actor, String tokenId, String tokenName, String action, String connectionId, String sql) {
         var event = new AuditStore.Event(actor, action, "mcp");
         event.tokenId = tokenId;
         event.tokenName = tokenName;

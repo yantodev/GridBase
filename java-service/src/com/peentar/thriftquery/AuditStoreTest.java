@@ -22,7 +22,7 @@ public final class AuditStoreTest {
             check(store.ownedQuery(first.requestId, "2002") == null, "Foreign query references are hidden");
             var second = new AuditStore.Event(bob, "connection.connect", "server"); store.begin(second);
             second.finishedAt = System.currentTimeMillis(); second.durationMs = 7L; second.httpStatus = 502; second.outcome = "failure"; second.code = "HTTP_502"; store.finish(second);
-            var anonymous = new AuditStore.Event(null, "auth.login", "server"); store.begin(anonymous);
+            var anonymous = new AuditStore.Event((Actor) null, "auth.login", "server"); store.begin(anonymous);
             anonymous.finishedAt = System.currentTimeMillis(); anonymous.durationMs = 0L; anonymous.httpStatus = 303; anonymous.outcome = "denied"; anonymous.code = "AUTH_INVALID_STATE"; store.finish(anonymous);
             String own = store.list("1001", false, Map.of()).toJson();
             check(own.contains(first.requestId) && !own.contains(second.requestId) && !own.contains(anonymous.requestId), "Own scope filters both foreign and anonymous actors");

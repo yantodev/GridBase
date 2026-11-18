@@ -22,7 +22,7 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.LongSupplier;
 
 /** GitHub tokens stay on the server and are discarded after identity verification. */
-final class GitHubAuth {
+final class GitHubAuth implements RequestAuth {
     private static final String SESSION_COOKIE = "gridbase_session";
     private static final String STATE_COOKIE = "gridbase_oauth";
     private static final long SESSION_SECONDS = 8 * 60 * 60;
@@ -42,7 +42,8 @@ final class GitHubAuth {
             validId(id);
             if (login == null || !login.matches("[A-Za-z0-9-]{1,39}")) throw new IllegalArgumentException("Invalid GitHub login");
         }
-        String toJson() { return "{\"id\":" + JsonUtil.quote(id) + ",\"login\":" + JsonUtil.quote(login) + "}"; }
+        Actor toActor() { return Actor.github(id, login); }
+        String toJson() { return "{\"id\":" + JsonUtil.quote(id) + ",\"login\":" + JsonUtil.quote(login) + ",\"provider\":\"github\"}"; }
     }
     static String validId(String id) {
         if (id == null || !id.matches("[1-9][0-9]{0,19}")) throw new IllegalArgumentException("Invalid GitHub ID");
@@ -51,6 +52,10 @@ final class GitHubAuth {
     User user(HttpExchange exchange) {
         Session session = sessions.get(cookie(exchange, SESSION_COOKIE));
         return session == null || session.expiresAt() <= clock.getAsLong() ? null : session.user();
+    }
+    @Override public Actor actor(HttpExchange exchange) {
+        User user = user(exchange);
+        return user == null ? null : user.toActor();
     }
     private record Pending(String verifier, long expiresAt) {}
     private record Session(User user, long expiresAt) {}
@@ -64,7 +69,7 @@ final class GitHubAuth {
     }
 
     /** Returns true when the request was fully handled, false when the protected handler may run. */
-    boolean handle(HttpExchange exchange, Set<String> auditAdmins) throws IOException {
+    @Override public boolean handle(HttpExchange exchange, Set<String> auditAdmins) throws IOException {
         long now = clock.getAsLong();
         pending.entrySet().removeIf(entry -> entry.getValue().expiresAt() <= now);
         sessions.entrySet().removeIf(entry -> entry.getValue().expiresAt() <= now);
@@ -148,7 +153,7 @@ final class GitHubAuth {
         if (!config.configured() || code.isBlank() || code.length() > 2048) { redirect(exchange, "/login?error=failed"); return; }
         try {
             User user = java.util.Objects.requireNonNull(provider.login(code, attempt.verifier()));
-            ActivityAudit.actor(exchange, user);
+            ActivityAudit.actor(exchange, user.toActor());
             String login = user.login();
             if (!config.allowedUsers().isEmpty() && !config.allowedUsers().contains(login.toLowerCase(Locale.ROOT))) {
                 redirect(exchange, "/login?error=not_allowed"); return;

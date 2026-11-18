@@ -4,9 +4,7 @@ import com.sun.net.httpserver.Headers;
 import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpServer;
 
-import java.io.ByteArrayOutputStream;
 import java.io.IOException;
-import java.io.InputStream;
 import java.net.InetSocketAddress;
 import java.net.URLDecoder;
 import java.util.HashMap;
@@ -27,13 +25,15 @@ public final class ThriftQueryServer {
 
     private final AppConfig config;
     private final ConnectionWorkspaces workspaces;
-    private final GitHubAuth auth;
+    private final RequestAuth auth;
     private final ActivityAudit audit;
     private final ActivityApi activity;
     private final McpApi mcpApi;
     private final McpServer mcp;
+    private final LocalMcpControl localMcp;
     private final ExecutorService executor = Executors.newFixedThreadPool(8);
     private HttpServer server;
+    private boolean stopped;
 
     private ThriftQueryServer(AppConfig config) {
         this(config, new ConnectionWorkspaces(config));
@@ -43,15 +43,19 @@ public final class ThriftQueryServer {
         this(config, workspaces, new GitHubAuth(config.auth));
     }
 
-    ThriftQueryServer(AppConfig config, ConnectionWorkspaces workspaces, GitHubAuth auth) {
+    ThriftQueryServer(AppConfig config, ConnectionWorkspaces workspaces, RequestAuth auth) {
+        if (config.localMode ? !(auth instanceof LocalAuth local && workspaces.localOwner(local)) : auth instanceof LocalAuth)
+            throw new IllegalArgumentException("Authentication mode does not match the workspace configuration.");
         this.config = config;
         this.workspaces = workspaces;
-        this.auth = auth;
         this.audit = new ActivityAudit(config);
         this.activity = new ActivityApi(audit);
         McpTokenStore tokens = new McpTokenStore(config.dataDir);
-        this.mcpApi = new McpApi(tokens, config.auth.appUrl());
-        this.mcp = new McpServer(config, workspaces, tokens, audit.store);
+        this.localMcp = config.localMode ? new LocalMcpControl(config, workspaces, workspaces.localWorkspace(), tokens, audit.store) : null;
+        this.auth = config.localMode ? ((LocalAuth) auth).withMcp(localMcp) : auth;
+        this.mcpApi = config.localMode ? new McpApi(tokens, localMcp, ((LocalAuth) auth).owner()) : new McpApi(tokens, config.auth.appUrl());
+        this.mcp = config.localMode ? null : new McpServer(config, workspaces, tokens, audit.store);
+        if (config.localMode) workspaces.forOwner(((LocalAuth) auth).owner());
     }
 
     public static void main(String[] args) throws Exception {
@@ -71,13 +75,23 @@ public final class ThriftQueryServer {
 
     private void start() throws IOException { start(config.port); }
 
-    void start(int port) throws IOException {
+    synchronized void start(int port) throws IOException {
+        if (stopped || server != null) throw new IllegalStateException("Engine has already started or stopped.");
+        if (config.localMode && (!config.host.equals("127.0.0.1") || config.port != 0 || port != 0 || !(auth instanceof LocalAuth)))
+            throw new IllegalArgumentException("Local engine requires an authenticated ephemeral loopback socket.");
         server = HttpServer.create(new InetSocketAddress(config.host, port), 0);
+        if (localMcp != null) {
+            try { localMcp.start(); }
+            catch (IOException | RuntimeException failure) { server.stop(0); server = null; throw failure; }
+            route("/api/local/mcp", (exchange, connections) -> localMcp.handle(exchange));
+        }
         // HttpServer contexts match prefixes: keep this browser asset out of /mcp.
-        route("/mcp.js", this::staticFiles);
-        server.createContext("/mcp", mcp::handle);
-        route("/api/mcp/tokens", (exchange, connections) -> mcpApi.handle(exchange, auth.user(exchange), connections));
-        route("/api/activity", (exchange, connections) -> activity.handle(exchange, auth.user(exchange)));
+        if (!config.localMode) {
+            route("/mcp.js", this::staticFiles);
+            server.createContext("/mcp", mcp::handle);
+        }
+        route("/api/mcp/tokens", (exchange, connections) -> mcpApi.handle(exchange, auth.actor(exchange), connections));
+        route("/api/activity", (exchange, connections) -> activity.handle(exchange, auth.actor(exchange)));
         route("/api/health", this::health);
         route("/api/connections", this::connectionRoutes);
         route("/api/query", this::query);
@@ -85,22 +99,26 @@ public final class ThriftQueryServer {
         route("/api/namespaces", this::namespaces);
         route("/api/tables", (exchange, connections) -> metadata(exchange, connections, false));
         route("/api/columns", (exchange, connections) -> metadata(exchange, connections, true));
-        route("/", this::staticFiles);
+        route("/", config.localMode ? (exchange, connections) -> sendJson(exchange, 404, error("Endpoint not found.")) : this::staticFiles);
         server.setExecutor(executor);
         server.start();
-        System.out.println("GridBase (Java JDBC) running at http://" + config.host + ":" + port());
-        System.out.println("Database connections are private to each GitHub account.");
-        if (!config.auth.configured()) System.out.println("GitHub login belum dikonfigurasi. Isi GITHUB_CLIENT_ID dan GITHUB_CLIENT_SECRET di .env.");
+        if (!config.localMode) {
+            System.out.println("GridBase (Java JDBC) running at http://" + config.host + ":" + port());
+            System.out.println("Database connections are private to each GitHub account.");
+            if (!config.auth.configured()) System.out.println("GitHub login belum dikonfigurasi. Isi GITHUB_CLIENT_ID dan GITHUB_CLIENT_SECRET di .env.");
+        }
     }
 
     private interface AccountHandler { void handle(HttpExchange exchange, ConnectionRegistry connections) throws IOException; }
 
     private void route(String path, AccountHandler handler) {
         server.createContext(path, incoming -> {
-            ActivityAudit.Exchange exchange = audit.wrap(incoming, auth.user(incoming));
+            Actor verified = auth.actor(incoming);
+            ActivityAudit.Exchange exchange = config.localMode && verified != null
+                    ? audit.wrap(incoming, verified, config.clientKind) : audit.wrap(incoming, verified);
             try {
                 if (auth.handle(exchange, config.auditAdminIds)) return;
-                GitHubAuth.User user = auth.user(exchange);
+                Actor user = auth.actor(exchange);
                 String actual = exchange.getRequestURI().getPath();
                 if (actual.startsWith("/api/") && user == null) {
                     sendJson(exchange, 401, error("Silakan login dengan GitHub.")); return;
@@ -110,9 +128,10 @@ public final class ThriftQueryServer {
                 }
                 exchange.beginOperation();
                 boolean profiles = actual.startsWith("/api/") && !actual.startsWith("/api/activity");
-                ConnectionRegistry connections = user != null && profiles ? workspaces.forOwner(user.id()) : null;
+                ConnectionRegistry connections = user != null && profiles ? workspaces.forOwner(user) : null;
                 handler.handle(exchange, connections);
-            } catch (AuditStore.Unavailable unavailable) { sendJson(exchange, 503, error(unavailable.getMessage())); }
+            } catch (BodyTooLarge oversized) { sendJson(exchange, 413, error("Request body too large.")); }
+            catch (AuditStore.Unavailable unavailable) { sendJson(exchange, 503, error(unavailable.getMessage())); }
             catch (McpTokenStore.Unavailable unavailable) { sendJson(exchange, 503, error(unavailable.getMessage())); }
             catch (ConnectionStore.StoreException unavailable) { sendJson(exchange, 503, error(unavailable.getMessage())); }
             catch (IllegalArgumentException invalid) { sendJson(exchange, 400, error("Request tidak valid.")); }
@@ -124,10 +143,20 @@ public final class ThriftQueryServer {
 
     int port() { return server.getAddress().getPort(); }
 
-    void stop() {
+    synchronized void stop() {
+        if (stopped) return;
+        stopped = true;
         if (server != null) server.stop(0);
         executor.shutdownNow();
-        mcp.close();
+        if (mcp != null) mcp.close();
+        if (localMcp != null) localMcp.close();
+        // The caller owns the workspace lock: never return while a request can still use it.
+        boolean interrupted = false;
+        while (config.localMode && !executor.isTerminated()) {
+            try { executor.awaitTermination(1, java.util.concurrent.TimeUnit.SECONDS); }
+            catch (InterruptedException interruption) { interrupted = true; }
+        }
+        if (interrupted) Thread.currentThread().interrupt();
     }
 
     private void health(HttpExchange exchange, ConnectionRegistry connections) throws IOException {
@@ -415,22 +444,13 @@ public final class ThriftQueryServer {
     }
 
     static String readBody(HttpExchange exchange) throws IOException {
-        String contentLength = exchange.getRequestHeaders().getFirst("Content-Length");
-        if (contentLength != null && Integer.parseInt(contentLength) > MAX_BODY_BYTES) {
-            throw new IOException("Request body too large");
-        }
-        try (InputStream input = exchange.getRequestBody(); ByteArrayOutputStream output = new ByteArrayOutputStream()) {
-            byte[] buffer = new byte[4096];
-            int total = 0;
-            int read;
-            while ((read = input.read(buffer)) != -1) {
-                total += read;
-                if (total > MAX_BODY_BYTES) throw new IOException("Request body too large");
-                output.write(buffer, 0, read);
-            }
-            return output.toString(StandardCharsets.UTF_8);
-        }
+        // Exchange owns the input lifetime. Closing it before sending an error
+        // can reset a body-bearing socket and discard the typed JSON response.
+        byte[] bytes = exchange.getRequestBody().readNBytes(MAX_BODY_BYTES + 1);
+        if (bytes.length > MAX_BODY_BYTES) throw new BodyTooLarge();
+        return new String(bytes, StandardCharsets.UTF_8);
     }
+    private static final class BodyTooLarge extends IOException { }
 
     static void sendJson(HttpExchange exchange, int status, String body) throws IOException {
         byte[] bytes = body.getBytes(StandardCharsets.UTF_8);

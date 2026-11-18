@@ -20,21 +20,47 @@ final class McpServer implements AutoCloseable {
     private final ThreadPoolExecutor workers = new ThreadPoolExecutor(4, 4, 0L, TimeUnit.MILLISECONDS,
             new SynchronousQueue<>(), runnable -> { Thread thread = new Thread(runnable, "gridbase-mcp"); thread.setDaemon(true); return thread; }, new ThreadPoolExecutor.AbortPolicy());
 
+    private final boolean localListener;
     McpServer(AppConfig config, ConnectionWorkspaces workspaces, McpTokenStore tokens, AuditStore audit) {
+        this(config, workspaces, tokens, audit, false);
+    }
+    /** Only LocalMcpControl supplies this policy; never inferred from OAuth/env. */
+    McpServer(AppConfig config, ConnectionWorkspaces workspaces, McpTokenStore tokens, AuditStore audit, boolean localListener) {
+        if (localListener != config.localMode) throw new IllegalArgumentException("MCP listener policy mismatch.");
         this.config = config; this.workspaces = workspaces; this.tokens = tokens; this.audit = new McpAudit(audit);
+        this.localListener = localListener;
     }
     @Override public void close() { workers.shutdownNow(); }
+    void awaitLocalWorkers() {
+        if (!localListener) throw new IllegalStateException("Only local teardown owns workspace lifetime.");
+        boolean interrupted = false;
+        while (!workers.isTerminated()) {
+            try { workers.awaitTermination(1, TimeUnit.SECONDS); }
+            catch (InterruptedException interruption) { interrupted = true; }
+        }
+        if (interrupted) Thread.currentThread().interrupt();
+    }
 
     void handle(HttpExchange exchange) throws IOException {
         try {
-            if (!exchange.getRequestURI().getPath().equals("/mcp")) { http(exchange, 404, "Endpoint tidak ditemukan."); return; }
-            if (!config.auth.secure() && !exchange.getRemoteAddress().getAddress().isLoopbackAddress()) { http(exchange, 403, "MCP jarak jauh membutuhkan APP_URL HTTPS dan reverse proxy TLS tepercaya."); return; }
-            String origin = exchange.getRequestHeaders().getFirst("Origin");
-            if (origin != null && !origin.equals(config.auth.appUrl())) { http(exchange, 403, "Asal request tidak diizinkan."); return; }
+            if (!(localListener ? exchange.getRequestURI().getRawPath() : exchange.getRequestURI().getPath()).equals("/mcp")) { http(exchange, 404, "Endpoint tidak ditemukan."); return; }
+            if (localListener) {
+                if (exchange.getLocalAddress() == null || exchange.getLocalAddress().getAddress() == null
+                        || !exchange.getLocalAddress().getAddress().isLoopbackAddress()
+                        || exchange.getRemoteAddress() == null || exchange.getRemoteAddress().getAddress() == null
+                        || !exchange.getRemoteAddress().getAddress().isLoopbackAddress()
+                        || exchange.getRequestHeaders().containsKey("Origin")) {
+                    http(exchange, 403, "Local MCP requires loopback without Origin."); return;
+                }
+            } else {
+                if (!config.auth.secure() && !exchange.getRemoteAddress().getAddress().isLoopbackAddress()) { http(exchange, 403, "MCP jarak jauh membutuhkan APP_URL HTTPS dan reverse proxy TLS tepercaya."); return; }
+                String origin = exchange.getRequestHeaders().getFirst("Origin");
+                if (origin != null && !origin.equals(config.auth.appUrl())) { http(exchange, 403, "Asal request tidak diizinkan."); return; }
+            }
             if (exchange.getRequestURI().getRawQuery() != null) { http(exchange, 400, "Query string tidak diizinkan."); return; }
             String bearer = bearer(exchange);
             McpTokenStore.Token token = tokens.authenticate(bearer);
-            if (token == null) { exchange.getResponseHeaders().set("WWW-Authenticate", "Bearer realm=\"GridBase MCP\""); http(exchange, 401, "Token tidak valid, kedaluwarsa, atau telah dicabut."); return; }
+            if (token == null || localListener && !token.ownerId().equals(workspaces.localWorkspace().actor().ownerKey())) { exchange.getResponseHeaders().set("WWW-Authenticate", "Bearer realm=\"GridBase MCP\""); http(exchange, 401, "Token tidak valid, kedaluwarsa, atau telah dicabut."); return; }
             if (!exchange.getRequestMethod().equals("POST")) { exchange.getResponseHeaders().set("Allow", "POST"); http(exchange, 405, "Streaming/session endpoint tidak tersedia."); return; }
             String type = exchange.getRequestHeaders().getFirst("Content-Type");
             if (type == null || !type.split(";", 2)[0].trim().equalsIgnoreCase("application/json")) { http(exchange, 415, "Content-Type application/json wajib digunakan."); return; }
@@ -169,7 +195,8 @@ final class McpServer implements AutoCloseable {
         } catch (IllegalArgumentException invalid) { return toolError("Parameter tool tidak valid.", null, false); }
         McpAudit.Operation operation;
         String action = switch (name) { case "list_connections" -> "mcp.connections"; case "list_databases" -> "metadata.databases"; case "list_tables" -> "metadata.tables"; case "describe_table" -> "metadata.columns"; default -> "query.execute"; };
-        try { operation = audit.start(new GitHubAuth.User(token.ownerId(), token.login()), token.id(), token.name(), action, connectionId, sql); }
+        Actor actor = Actor.fromOwnerKey(token.ownerId(), token.login());
+        try { operation = audit.start(actor, token.id(), token.name(), action, connectionId, sql); }
         catch (AuditStore.Unavailable unavailable) { return toolError("Audit tidak tersedia; operasi tidak dijalankan.", null, false); }
         JdbcService.QueryResult query = null;
         boolean success = false, denied = false;
@@ -177,7 +204,7 @@ final class McpServer implements AutoCloseable {
         try {
             var current = tokens.authenticate(bearer);
             if (current == null || !current.id().equals(token.id())) throw new Denied();
-            ConnectionRegistry registry = workspaces.forOwner(token.ownerId());
+            ConnectionRegistry registry = workspaces.forOwner(actor);
             if (name.equals("list_connections")) {
                 JsonArray approved = new JsonArray();
                 synchronized (registry) {

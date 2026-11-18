@@ -137,7 +137,7 @@ public final class McpAuditTest {
         invalid(() -> store.begin(new AuditStore.Event(ALICE, "mcp.connections", "server")), "MCP-only action cannot use ordinary source");
         invalid(() -> store.begin(new AuditStore.Event(ALICE, "query.execute", "browser")), "Browser cannot forge server queries");
         invalid(() -> store.begin(new AuditStore.Event(ALICE, "result.export_requested", "server")), "Exports remain browser-only");
-        invalid(() -> audit.start(null, TOKEN_ID, TOKEN_NAME, "mcp.connections", null, null), "MCP requires a verified actor");
+        invalid(() -> audit.start((Actor) null, TOKEN_ID, TOKEN_NAME, "mcp.connections", null, null), "MCP requires a verified actor");
         invalid(() -> audit.start(ALICE, null, TOKEN_NAME, "mcp.connections", null, null), "MCP requires token identity");
         invalid(() -> audit.start(ALICE, TOKEN_ID, null, "mcp.connections", null, null), "MCP requires token name snapshot");
         invalid(() -> audit.start(ALICE, SECRET + "!", TOKEN_NAME, "mcp.connections", null, null), "Malformed token IDs fail validation");
