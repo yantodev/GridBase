@@ -1,7 +1,7 @@
 openapi: 3.0.3
 info:
   title: GridBase API
-  version: 1.3.2
+  version: 1.4.0
   description: >-
     Java JDBC APIs for Spark Thrift/Hive, PostgreSQL and MySQL. Browser database
     and token-management APIs require the verified GitHub session cookie; /mcp
