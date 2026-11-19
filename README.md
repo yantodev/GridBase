@@ -260,6 +260,14 @@ ls "$SPARK_HOME/jars/hive-jdbc-2.3.9.jar"
 npm start
 ```
 
+Build lokal menargetkan bytecode Java 17, termasuk ketika compiler default lebih baru.
+Jika `JAVA_HOME` diisi, compiler dan runtime diambil dari JDK yang sama.
+`npm run check` memakai direktori sementara yang dibersihkan setelah selesai;
+tidak menimpa class aplikasi yang sedang berjalan. Setiap startup memakai direktori
+immutable baru di `build/java-runs/`. Direktori runtime lama boleh dibersihkan hanya
+ketika semua instance GridBase yang memakainya sudah dihentikan; jangan menghapus
+class dari proses yang masih berjalan karena JVM memuat sebagian class secara lazy.
+
 ## Menjalankan dengan Docker Compose
 
 Mode Docker tidak membutuhkan instalasi Java atau Spark di komputer host.

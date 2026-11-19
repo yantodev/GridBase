@@ -5,16 +5,21 @@ import com.sun.net.httpserver.HttpExchange;
 import java.io.IOException;
 import java.util.*;
 
-/** Browser-session-only token management; never consumes bearer credentials. */
+/** Trusted browser-session or native-capability management; never consumes bearer credentials. */
 final class McpApi {
     private final McpTokenStore tokens;
-    private final String endpoint;
-    McpApi(McpTokenStore tokens, String appUrl) { this.tokens = tokens; endpoint = appUrl + "/mcp"; }
-    void handle(HttpExchange exchange, GitHubAuth.User actor, ConnectionRegistry connections) throws IOException {
+    private final java.util.function.Supplier<String> endpoint;
+    private final Actor localOwner;
+    McpApi(McpTokenStore tokens, String appUrl) { this.tokens = tokens; endpoint = () -> appUrl + "/mcp"; localOwner = null; }
+    McpApi(McpTokenStore tokens, LocalMcpControl control, Actor localOwner) {
+        if (localOwner == null || !localOwner.provider().equals("local")) throw new IllegalArgumentException();
+        this.tokens = tokens; this.endpoint = control::endpoint; this.localOwner = localOwner;
+    }
+    void handle(HttpExchange exchange, Actor actor, ConnectionRegistry connections) throws IOException {
         String path = exchange.getRequestURI().getPath(), method = exchange.getRequestMethod();
         try {
             if (actor == null) { send(exchange, 401, "Silakan login dengan GitHub."); return; }
-            if (!actor.id().equals(exchange.getRequestHeaders().getFirst("X-GridBase-Account"))) { send(exchange, 409, "Akun berubah. Muat ulang aplikasi."); return; }
+            if (localOwner != null ? !localOwner.equals(actor) : !actor.ownerKey().equals(exchange.getRequestHeaders().getFirst("X-GridBase-Account"))) { send(exchange, 409, "Akun berubah. Muat ulang aplikasi."); return; }
             if (path.equals("/api/mcp/tokens")) {
                 if (method.equals("GET")) {
                     JsonArray available = new JsonArray();
@@ -25,8 +30,8 @@ final class McpApi {
                             item.addProperty("type", profile.service().profile().type().id()); item.addProperty("mcpReadOnly", profile.readOnly()); available.add(item);
                         }
                     }
-                    JsonArray list = new JsonArray(); for (var token : tokens.list(actor.id())) list.add(StrictJson.object(token.toJson()));
-                    JsonObject response = new JsonObject(); response.add("tokens", list); response.add("connections", available); response.addProperty("endpoint", endpoint);
+                    JsonArray list = new JsonArray(); for (var token : tokens.list(actor.ownerKey())) list.add(StrictJson.object(token.toJson()));
+                    JsonObject response = new JsonObject(); response.add("tokens", list); response.add("connections", available); response.addProperty("endpoint", endpoint.get());
                     ThriftQueryServer.sendJson(exchange, 200, response.toString()); return;
                 }
                 if (method.equals("POST")) {
@@ -54,8 +59,8 @@ final class McpApi {
             if (path.matches("/api/mcp/tokens/[0-9a-f-]{36}")) {
                 if (!method.equals("DELETE")) { exchange.getResponseHeaders().set("Allow", "DELETE"); send(exchange, 405, "Method tidak didukung."); return; }
                 String tokenId = path.substring("/api/mcp/tokens/".length());
-                if (tokens.list(actor.id()).stream().noneMatch(token -> token.id().equals(tokenId))) { send(exchange, 404, "Token tidak ditemukan."); return; }
-                tokens.revoke(actor.id(), tokenId);
+                if (tokens.list(actor.ownerKey()).stream().noneMatch(token -> token.id().equals(tokenId))) { send(exchange, 404, "Token tidak ditemukan."); return; }
+                tokens.revoke(actor.ownerKey(), tokenId);
                 ThriftQueryServer.sendJson(exchange, 200, "{\"ok\":true}"); return;
             }
             send(exchange, 404, "Endpoint tidak ditemukan.");

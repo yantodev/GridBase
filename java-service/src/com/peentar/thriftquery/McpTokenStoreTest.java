@@ -95,7 +95,7 @@ public final class McpTokenStoreTest {
             expectInvalid(() -> store.create(user, "x".repeat(81), "read_only", 30, grants()));
             expectInvalid(() -> store.create(user, "Agent\nname", "read_only", 30, grants()));
             expectInvalid(() -> store.create(user, null, "read_only", 30, grants()));
-            expectInvalid(() -> store.create(null, "Agent", "read_only", 30, grants()));
+            expectInvalid(() -> store.create((Actor) null, "Agent", "read_only", 30, grants()));
             expectInvalid(() -> store.create(user, "Agent", "admin", 30, grants()));
             expectInvalid(() -> store.create(user, "Agent", null, 30, grants()));
             for (int days : new int[]{-1, 0, 1, 31, 89, 366, Integer.MAX_VALUE}) {

@@ -18,6 +18,7 @@ public final class AppConfigTest {
                     "THRIFT_JDBC_URL", "invalid-old-url", "THRIFT_USERNAME", "fixture", "THRIFT_PASSWORD", "fixture-secret", "DATABASE_TYPE", "old-type"));
             check(overridden.port == 4181 && overridden.timeoutSeconds == 12 && overridden.defaultQueryLimit == 25, "Environment overrides server settings");
             check(new ConnectionRegistry(overridden, "1001").entries().isEmpty(), "Old process credentials must not activate a source or break startup");
+            localConfig(root);
             Files.delete(root.resolve(".env"));
             AppConfig defaults = AppConfig.load(root, Map.of());
             check(defaults.port == 4173 && defaults.timeoutSeconds == 30 && defaults.defaultQueryLimit == 50, "Server defaults");
@@ -45,6 +46,27 @@ public final class AppConfigTest {
             try (var paths = Files.walk(root)) { for (Path path : paths.sorted(java.util.Comparator.reverseOrder()).toList()) Files.deleteIfExists(path); }
         }
         System.out.println("App config tests passed");
+    }
+    private static void localConfig(Path root) throws Exception {
+        Path resources = root.resolve("resources 空 間"), data = root.resolve("offline data"), temp = root.resolve("offline temp");
+        Files.createDirectory(resources);
+        Files.writeString(resources.resolve(".env"), "PORT=invalid\nAPP_URL=invalid\nGITHUB_CLIENT_ID=evil\nGITHUB_CLIENT_SECRET=evil\nAUDIT_ADMIN_IDS=bad\n");
+        for (String kind : java.util.List.of("desktop", "vscode")) {
+            AppConfig local = AppConfig.local(resources, data, temp, kind);
+            check(local.localMode && local.clientKind.equals(kind) && local.host.equals("127.0.0.1") && local.port == 0, "explicit local mode and ephemeral loopback");
+            check(local.timeoutSeconds == 30 && local.defaultQueryLimit == 50, "fixed local limits");
+            check(local.publicDir.equals(resources.resolve("public")) && local.dataDir.equals(data) && local.tempDir.equals(temp), "explicit Unicode/space paths");
+            check(!local.auth.configured() && local.auth.appUrl().equals("http://127.0.0.1:0") && local.legacyConnectionOwnerId.isEmpty() && local.auditAdminIds.isEmpty(), "no local OAuth/environment loading or reachable app URL");
+        }
+        check(!AppConfig.load(root, Map.of()).localMode, "load stays server mode");
+        for (Path[] paths : java.util.List.of(new Path[]{Path.of("relative"), data, temp}, new Path[]{resources, resources.resolve("data"), temp}, new Path[]{data.resolve("resources"), data, temp}, new Path[]{resources, data, resources.resolve("temp")}, new Path[]{resources, data, data.resolve("temp")}, new Path[]{resources, Path.of("relative"), temp})) {
+            try { AppConfig.local(paths[0], paths[1], paths[2], "desktop"); throw new AssertionError("unsafe local paths accepted"); } catch (IllegalArgumentException expected) { }
+        }
+        try { AppConfig.local(resources, data, temp, "browser"); throw new AssertionError("invalid local client accepted"); } catch (IllegalArgumentException expected) { }
+        if (Files.getFileStore(root).supportsFileAttributeView("posix")) {
+            Files.createSymbolicLink(resources.resolve("public"), data);
+            try { AppConfig.local(resources, data, temp, "desktop"); throw new AssertionError("linked public resources accepted"); } catch (IllegalArgumentException expected) { }
+        }
     }
     private static void check(boolean ok, String message) { if (!ok) throw new AssertionError(message); }
 }

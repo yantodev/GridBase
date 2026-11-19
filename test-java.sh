@@ -2,6 +2,8 @@
 set -euo pipefail
 
 PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+cd "$PROJECT_ROOT"
+if [[ -n "${JAVA_HOME:-}" ]]; then export PATH="$JAVA_HOME/bin:$PATH"; fi
 BUILD_DIR="$PROJECT_ROOT/build/java-tests"
 SPARK_ROOT="${SPARK_HOME:-/home/buana/.local/opt/spark-3.5.6-bin-hadoop3}"
 SQLITE_JAR="$(bash "$PROJECT_ROOT/ensure-sqlite-driver.sh")"
@@ -13,8 +15,19 @@ if [[ ! -f "$SPARK_ROOT/jars/hive-jdbc-2.3.9.jar" ]]; then
 fi
 mkdir -p "$BUILD_DIR"
 mapfile -d '' JAVA_SOURCES < <(find "$PROJECT_ROOT/java-service/src" -type f -name '*.java' -print0)
-javac --add-modules jdk.httpserver -cp "$MCP_DEPS" -d "$BUILD_DIR" "${JAVA_SOURCES[@]}"
+javac --release 17 --add-modules jdk.httpserver -cp "$MCP_DEPS" -d "$BUILD_DIR" "${JAVA_SOURCES[@]}"
 
+java -ea --add-modules jdk.httpserver -cp "$TEST_CLASSPATH" com.peentar.thriftquery.ActorTest
+java -ea --add-modules jdk.httpserver -cp "$TEST_CLASSPATH" com.peentar.thriftquery.PrivateFilesTest
+java -ea --add-modules jdk.httpserver -cp "$TEST_CLASSPATH" com.peentar.thriftquery.PrivateFilesSidecarLifecycleTest
+java -ea --add-modules jdk.httpserver -cp "$TEST_CLASSPATH" com.peentar.thriftquery.SidecarIdentityMcpTest
+java -ea --add-modules jdk.httpserver -cp "$TEST_CLASSPATH" com.peentar.thriftquery.LocalWorkspaceTest
+java -ea --add-modules jdk.httpserver -cp "$TEST_CLASSPATH" com.peentar.thriftquery.LocalAuthTest
+java -ea --add-modules jdk.httpserver -cp "$TEST_CLASSPATH" com.peentar.thriftquery.LocalEngineHttpTest
+java -ea --add-modules jdk.httpserver -cp "$TEST_CLASSPATH" com.peentar.thriftquery.LocalMcpTest
+java -ea --add-modules jdk.httpserver -cp "$TEST_CLASSPATH" com.peentar.thriftquery.LocalMcpRebindEofTest
+java -ea --add-modules jdk.httpserver -cp "$TEST_CLASSPATH" com.peentar.thriftquery.LocalEngineProcessTest
+java -ea --add-modules jdk.httpserver -cp "$TEST_CLASSPATH" com.peentar.thriftquery.ServerShutdownProcessTest
 java -ea --add-modules jdk.httpserver -cp "$TEST_CLASSPATH" com.peentar.thriftquery.SqlPolicyTest
 java -ea --add-modules jdk.httpserver -cp "$TEST_CLASSPATH" com.peentar.thriftquery.JsonUtilTest
 java -ea --add-modules jdk.httpserver -cp "$TEST_CLASSPATH" com.peentar.thriftquery.StrictJsonTest
@@ -29,6 +42,7 @@ java -ea --add-modules jdk.httpserver -cp "$TEST_CLASSPATH" com.peentar.thriftqu
 java -ea --add-modules jdk.httpserver -cp "$TEST_CLASSPATH" com.peentar.thriftquery.ConnectionProfileTest
 java -ea --add-modules jdk.httpserver -cp "$TEST_CLASSPATH" com.peentar.thriftquery.ConnectionRegistryTest
 java -ea --add-modules jdk.httpserver -cp "$TEST_CLASSPATH" com.peentar.thriftquery.ConnectionStoreTest
+java -ea --add-modules jdk.httpserver -cp "$TEST_CLASSPATH" com.peentar.thriftquery.ConnectionStoreKeyRaceTest
 java -ea --add-modules jdk.httpserver -cp "$TEST_CLASSPATH" com.peentar.thriftquery.AuditStoreTest
 java -ea --add-modules jdk.httpserver -cp "$TEST_CLASSPATH" com.peentar.thriftquery.ActivityHttpTest
 java -ea --add-modules jdk.httpserver -cp "$TEST_CLASSPATH" com.peentar.thriftquery.ConnectionHttpTest

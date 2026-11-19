@@ -13,23 +13,53 @@ public final class AppConfig {
     public final int defaultQueryLimit;
     public final Path publicDir;
     public final Path dataDir;
+    public final Path tempDir;
+    public final boolean localMode;
+    public final String clientKind;
     final AuthConfig auth;
     final String legacyConnectionOwnerId;
     final java.util.Set<String> auditAdminIds;
 
     private AppConfig(String host, int port, int timeoutSeconds, int defaultQueryLimit, Path publicDir, AuthConfig auth, String legacyConnectionOwnerId, String auditAdmins) {
+        this(host, port, timeoutSeconds, defaultQueryLimit, publicDir, publicDir.getParent().resolve("data"),
+                Path.of(System.getProperty("java.io.tmpdir")).toAbsolutePath().normalize(), false, "server", auth, legacyConnectionOwnerId, auditAdmins);
+    }
+
+    private AppConfig(String host, int port, int timeoutSeconds, int defaultQueryLimit, Path publicDir, Path dataDir,
+                      Path tempDir, boolean localMode, String clientKind, AuthConfig auth, String legacyConnectionOwnerId, String auditAdmins) {
         this.host = host;
         this.port = port;
         this.timeoutSeconds = timeoutSeconds;
         this.defaultQueryLimit = defaultQueryLimit;
         this.publicDir = publicDir;
-        this.dataDir = publicDir.getParent().resolve("data");
+        this.dataDir = dataDir;
+        this.tempDir = tempDir;
+        this.localMode = localMode;
+        this.clientKind = clientKind;
         this.auth = auth;
         this.legacyConnectionOwnerId = legacyConnectionOwnerId.isBlank() ? "" : GitHubAuth.validId(legacyConnectionOwnerId);
         java.util.Set<String> ids = new java.util.HashSet<>();
         if (!auditAdmins.isBlank()) for (String id : auditAdmins.split(",", -1)) ids.add(GitHubAuth.validId(id.trim()));
         this.auditAdminIds = java.util.Set.copyOf(ids);
     }
+
+    /** Explicit offline configuration; deliberately never consults .env or process settings. */
+    public static AppConfig local(Path resourceRoot, Path dataDir, Path tempDir, String clientKind) {
+        if (!java.util.Set.of("desktop", "vscode").contains(clientKind)) throw new IllegalArgumentException("Invalid local client kind.");
+        Path resources = localPath(resourceRoot), data = localPath(dataDir), temp = localPath(tempDir);
+        localPath(resources.resolve("public"));
+        if (overlap(resources, data) || overlap(resources, temp) || overlap(data, temp)) throw new IllegalArgumentException("Local resource, data and temporary directories must be separate.");
+        return new AppConfig("127.0.0.1", 0, 30, 50, resources.resolve("public"), data, temp, true, clientKind,
+                new AuthConfig("http://127.0.0.1:0", "", "", java.util.Set.of()), "", "");
+    }
+    private static Path localPath(Path path) {
+        if (path == null || !path.isAbsolute()) throw new IllegalArgumentException("Local paths must be absolute and safe.");
+        Path normalized = path.normalize();
+        try { PrivateFiles.checkPath(normalized); }
+        catch (IOException unsafe) { throw new IllegalArgumentException("Local paths must not contain links or unsafe indirection."); }
+        return normalized;
+    }
+    private static boolean overlap(Path a, Path b) { return a.startsWith(b) || b.startsWith(a); }
 
     public static AppConfig load(Path projectRoot) {
         return load(projectRoot, System.getenv());

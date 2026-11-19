@@ -26,7 +26,7 @@ public final class McpSdkTest {
             if (process.exitValue() != 0) throw new AssertionError("SDK probe failed");
         } finally { server.stop(); try (var paths = Files.walk(root)) { for (Path path : paths.sorted(Comparator.reverseOrder()).toList()) Files.deleteIfExists(path); } }
     }
-    private static java.sql.Connection fixture() {
+    static java.sql.Connection fixture() {
         var metadata = proxy(java.sql.ResultSetMetaData.class, (method, args) -> switch (method) {
             case "getColumnCount" -> 1;
             case "getColumnLabel", "getColumnName" -> "fixture";
