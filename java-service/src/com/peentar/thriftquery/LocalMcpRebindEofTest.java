@@ -145,19 +145,62 @@ public final class LocalMcpRebindEofTest {
         }
         throw new AssertionError("Pending candidate did not bind before guarded deadline");
     }
+    @FunctionalInterface
+    interface SocketConnector {
+        void connect(Socket socket, SocketAddress address, int timeoutMillis) throws IOException;
+    }
     private static void awaitClosed(String endpoint, Process process, String reason) throws Exception {
-        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(3);
-        while (System.nanoTime() < deadline) {
-            try (Socket socket = new Socket()) { socket.connect(new InetSocketAddress("127.0.0.1", URI.create(endpoint).getPort()), 250); }
-            catch (ConnectException closed) { assertions++; return; }
-            check(process == null || process.isAlive(), "Engine exited before JDBC fixture release");
-            Thread.sleep(5);
-        }
-        throw new AssertionError(reason);
+        awaitClosed(endpoint, process, reason, Socket::connect, TimeUnit.SECONDS.toNanos(3));
+    }
+    static void awaitClosed(String endpoint, Process process, String reason, SocketConnector connector, long budgetNanos) throws Exception {
+        observeClosed(endpoint, process, reason, connector, budgetNanos, false);
     }
     private static void absentAfterExit(String endpoint) throws Exception {
-        try (Socket socket = new Socket()) { socket.connect(new InetSocketAddress("127.0.0.1", URI.create(endpoint).getPort()), 250); throw new AssertionError("Candidate resurrected after shutdown"); }
-        catch (ConnectException closed) { assertions++; }
+        absentAfterExit(endpoint, Socket::connect, TimeUnit.SECONDS.toNanos(3));
+    }
+    static void absentAfterExit(String endpoint, SocketConnector connector, long budgetNanos) throws Exception {
+        observeClosed(endpoint, null, "Candidate resurrected after shutdown", connector, budgetNanos, true);
+    }
+    private static void observeClosed(String endpoint, Process process, String reason, SocketConnector connector, long budgetNanos, boolean afterExit) throws Exception {
+        InetSocketAddress address = new InetSocketAddress("127.0.0.1", URI.create(endpoint).getPort());
+        long deadline = System.nanoTime() + budgetNanos;
+        IOException lastReset = null;
+        int resets = 0, accepting = 0;
+        while (System.nanoTime() < deadline) {
+            check(process == null || process.isAlive(), "Engine exited before JDBC fixture release");
+            long remaining = deadline - System.nanoTime();
+            if (remaining <= 0) break;
+            int timeoutMillis = (int) Math.min(250, 1 + (remaining - 1) / 1_000_000);
+            boolean refused = false, connected = false;
+            try (Socket socket = new Socket()) {
+                connector.connect(socket, address, timeoutMillis);
+                connected = true;
+            } catch (ConnectException failure) {
+                // ConnectException is only typically refusal; other connect errors prove nothing.
+                if (!"Connection refused".equals(failure.getMessage()) && !"Connection refused: connect".equals(failure.getMessage()))
+                    throw closureFailure(reason, endpoint, "connect failed without explicit refusal", failure);
+                refused = true;
+            } catch (IOException failure) {
+                // Linux/JDK 17 exposes ECONNRESET as SocketException text, not a typed errno.
+                // Only these known reset outcomes merit another observation; never closure success.
+                if (failure instanceof SocketException && ("Connection reset by peer".equals(failure.getMessage())
+                        || "Connection reset".equals(failure.getMessage()))) {
+                    lastReset = failure; resets++;
+                } else throw closureFailure(reason, endpoint, "unexpected connect I/O", failure);
+            }
+            check(process == null || process.isAlive(), "Engine exited before JDBC fixture release");
+            if (refused) { assertions++; return; }
+            if (connected) {
+                accepting++;
+                if (afterExit) throw closureFailure(reason, endpoint, "listener accepted a connection", null);
+            }
+            remaining = deadline - System.nanoTime();
+            if (remaining > 0) TimeUnit.NANOSECONDS.sleep(Math.min(TimeUnit.MILLISECONDS.toNanos(5), remaining));
+        }
+        throw closureFailure(reason, endpoint, "deadline expired without connection refusal (resets=" + resets + ", accepting=" + accepting + ")", lastReset);
+    }
+    private static AssertionError closureFailure(String reason, String endpoint, String detail, IOException cause) {
+        return new AssertionError(reason + " [" + endpoint + "]: closure not proven; " + detail, cause);
     }
     private static void finishRequest(CompletableFuture<HttpResponse<String>> request) throws Exception {
         try { request.get(10, TimeUnit.SECONDS); } catch (ExecutionException expected) { /* Closed response is unknown; never retry business SQL. */ }

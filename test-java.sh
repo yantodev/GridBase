@@ -25,6 +25,7 @@ java -ea --add-modules jdk.httpserver -cp "$TEST_CLASSPATH" com.peentar.thriftqu
 java -ea --add-modules jdk.httpserver -cp "$TEST_CLASSPATH" com.peentar.thriftquery.LocalAuthTest
 java -ea --add-modules jdk.httpserver -cp "$TEST_CLASSPATH" com.peentar.thriftquery.LocalEngineHttpTest
 java -ea --add-modules jdk.httpserver -cp "$TEST_CLASSPATH" com.peentar.thriftquery.LocalMcpTest
+java -ea --add-modules jdk.httpserver -cp "$TEST_CLASSPATH" com.peentar.thriftquery.LocalMcpSocketObservationTest
 java -ea --add-modules jdk.httpserver -cp "$TEST_CLASSPATH" com.peentar.thriftquery.LocalMcpRebindEofTest
 java -ea --add-modules jdk.httpserver -cp "$TEST_CLASSPATH" com.peentar.thriftquery.LocalEngineProcessTest
 java -ea --add-modules jdk.httpserver -cp "$TEST_CLASSPATH" com.peentar.thriftquery.ServerShutdownProcessTest

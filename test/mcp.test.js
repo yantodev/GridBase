@@ -7,7 +7,7 @@ const path = require('node:path');
 const root = path.join(__dirname, '..');
 const flush = async () => { for (let i = 0; i < 4; i++) await new Promise(setImmediate); };
 const deferred = () => { let resolve, reject; const promise = new Promise((a,b) => { resolve=a; reject=b; }); return {promise,resolve,reject}; };
-function setup({connections=[{id:'ro',name:'Read replica',type:'postgresql',mcpReadOnly:true,connected:false},{id:'rw',name:'Writer',type:'hive',mcpReadOnly:false,connected:false}],tokens=[],storage=new Map()}={}) {
+function setup({connections=[{id:'ro',name:'Read replica',type:'postgresql',mcpReadOnly:true,connected:false},{id:'rw',name:'Writer',type:'hive',mcpReadOnly:false,connected:false}],tokens=[],storage=new Map(),local=false}={}) {
   let document;
   const observers=[];
   const notify = target => { for (const observer of observers) if (observer.targets.includes(target)) queueMicrotask(() => observer.callback()); };
@@ -71,6 +71,7 @@ function setup({connections=[{id:'ro',name:'Read replica',type:'postgresql',mcpR
   const window={WorkbenchCore:require('../public/workbench-core'),GridBaseSession:{user:{id:'1001',login:'alice'},capabilities:{auditAdmin:false}},location:{href:'https://gridbase.example/'},localStorage:{getItem:key=>storage.get(key)||null,setItem:(key,value)=>storage.set(key,value)},matchMedia:()=>({matches:false,addEventListener(){}}),setTimeout(){},clearTimeout(){},listeners:{},addEventListener:Element.prototype.addEventListener,emit:Element.prototype.emit,confirm:()=>true,navigator:{clipboard:{writeText:async value=>{copies.push(value);}}}};
   const context=vm.createContext({document,window,navigator:window.navigator,MutationObserver:class{constructor(callback){this.callback=callback;this.targets=[];observers.push(this);}observe(target){this.targets.push(target);}},fetch:async(url,options={})=>{
     requests.push({url,options});
+    if(url==='/api/local/mcp'){if(handler){const result=await handler(url,options);if(result)return result;}return {ok:true,json:async()=>({enabled:false,endpoint:null})};}
     if(url.startsWith('/api/mcp/')){
       if(handler){const result=await handler(url,options);if(result)return result;}
       return {ok:true,json:async()=>({tokens,connections:safeConnections,endpoint:'https://gridbase.example/mcp'})};
@@ -79,6 +80,7 @@ function setup({connections=[{id:'ro',name:'Read replica',type:'postgresql',mcpR
     const data=url==='/api/connections'?{connections,defaultConnectionId:null}:url.startsWith('/api/connections/')?{...connections.find(n=>n.id===id),username:'fixture',password:'fixture',host:'fixture',port:'5432',database:'app'}:url.startsWith('/api/activity')?{events:[],nextCursor:null}:{};
     return {ok:true,json:async()=>data};
   },Event:class{constructor(type){this.type=type;}},URL,URLSearchParams,Blob,console});
+  if(local){window.GridBaseSession={mode:'local',user:{id:'local:11111111-1111-4111-8111-111111111111',login:'Local',provider:'local'},capabilities:{auditAdmin:false}};window.GridBaseTransport=Object.freeze({native:true,request:(...args)=>context.fetch(...args)});}
   if(fs.existsSync(path.join(root,'public/mcp.js')))vm.runInContext(fs.readFileSync(path.join(root,'public/mcp.js'),'utf8'),context);
   vm.runInContext(fs.readFileSync(path.join(root,'public/activity.js'),'utf8'),context);
   vm.runInContext(fs.readFileSync(path.join(root,'public/app.js'),'utf8'),context);
@@ -90,6 +92,15 @@ const response = data => ({ok:true,json:async()=>data});
 const token = {id:'token-1',name:'Assistant',prefix:'gbmcp_safe',scope:'read_only',grants:[{connectionId:'ro',generation:'fixture-generation',readOnly:true}],createdAt:1794690000000,expiresAt:1890000000000,revokedAt:null};
 async function open(app){const control=app.get('account-settings');assert.ok(control,'account MCP settings control is present');await control.click();await flush();}
 
+test('local settings use actual MCP control, local labels and explain separate AI approval without enabling by default',async()=>{
+  const app=setup({local:true});await flush();await open(app);
+  assert.equal(app.get('mcp-local-settings').hidden,false);assert.match(app.get('mcp-account').textContent,/^Local/);assert.doesNotMatch(app.get('mcp-account').textContent,/@Local/);
+  assert.equal(app.get('mcp-local-enabled').checked,false);assert.equal(app.get('mcp-local-port').value,'');assert.match(app.get('mcp-local-settings').textContent,/AI.*approval/i);assert.equal(app.get('mcp-status').textContent,'');assert.ok(app.requests.some(r=>r.url==='/api/mcp/tokens'));
+  app.setHandler((url,options)=>url==='/api/local/mcp'?response({enabled:options.method==='PUT',port:9876,endpoint:options.method==='PUT'?'http://127.0.0.1:9876/mcp':null}):response({connections:[],tokens:[],endpoint:null}));
+  app.get('mcp-local-enabled').checked=true;app.get('mcp-local-port').value='9876';await app.get('mcp-local-form').emit('submit');
+  const request=app.requests.find(r=>r.url==='/api/local/mcp'&&r.options.method==='PUT');assert.deepEqual(JSON.parse(request.options.body),{enabled:true,port:9876});
+  assert.equal(app.get('mcp-secret').textContent,'');assert.equal(app.storage.has('gridbase:connections:v1:github:1001'),false);
+});
 test('rail exposes DB, History and Logs while retaining existing panel navigation and resize geometry',async()=>{
   const app=setup();await flush();
   for(const [id,label] of [['database-tool','DB'],['history-tool','History'],['activity-tool','Logs']])assert.equal(app.get(id).querySelector('span')?.textContent,label);

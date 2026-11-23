@@ -5,6 +5,7 @@
     const $ = id => document.querySelector('#' + id);
     const dialog = $('mcp-dialog'), app = $('app');
     const owner = user.id;
+    const local = window.GridBaseSession?.mode === 'local' && user.provider === 'local';
     let revision = 0, opened = false, busy = false, loaded = false;
     let connections = [], tokens = [];
     const node = (tag, className, text) => {
@@ -19,6 +20,7 @@
       $('mcp-copy-secret').disabled = true;
     }
     function controls() {
+      if(local){$('mcp-local-save').disabled=busy;$('mcp-local-enabled').disabled=busy;$('mcp-local-port').disabled=busy;}
       $('mcp-fields').disabled = busy || !loaded;
       $('mcp-create').disabled = busy || !loaded || !connections.some(c => $('mcp-scope').value === 'full_access' || c.mcpReadOnly);
       $('mcp-refresh').disabled = busy;
@@ -101,6 +103,15 @@
       loaded = true; renderConnections(); renderTokens();
     }
     async function load(attempt) {
+      if(local){
+        const settings=await api('/api/local/mcp',{cache:'no-store'});
+        if(!current(attempt))return false;
+        const endpoint=typeof settings.endpoint==='string'?settings.endpoint.match(/^http:\/\/127\.0\.0\.1:([1-9][0-9]{0,4})\/mcp$/):null;
+        if(typeof settings.enabled!=='boolean'||(settings.enabled?(!endpoint||Number(endpoint[1])>65535):settings.endpoint!==null))throw new Error('Local MCP settings are unavailable.');
+        $('mcp-local-enabled').checked=settings.enabled;
+        if(endpoint)$('mcp-local-port').value=endpoint[1];
+        $('mcp-local-port').placeholder='Choose a port to enable MCP';
+      }
       const data = await api('/api/mcp/tokens', {cache:'no-store'});
       if (!current(attempt)) return false;
       accept(data); return true;
@@ -116,7 +127,7 @@
       close();
       if (window.GridBaseSession?.user?.id !== owner || app.hidden || document.visibilityState === 'hidden') return;
       opened = true; dialog.hidden = false; dialog.showModal();
-      $('mcp-account').textContent = '@' + user.login + ' · Account settings';
+      $('mcp-account').textContent = local ? 'Local · Local profile settings' : '@' + user.login + ' · Account settings';
       $('mcp-name').focus();
       return refresh();
     }
@@ -169,6 +180,21 @@
         await window.navigator.clipboard.writeText($(id).textContent);
         if (current(attempt)) $('mcp-status').textContent = 'Copied to clipboard.';
       } catch { if (current(attempt)) $('mcp-status').textContent = 'Clipboard unavailable. Select and copy the displayed value manually.'; }
+    }
+    if(local){
+      $('mcp-local-settings').hidden=false;
+      $('mcp-owner-help').textContent='Tokens belong to this local profile and allow access only to explicitly selected saved connections, even when disconnected. Disconnect does not revoke MCP access: revoke tokens to stop access. AI client approvals, not desktop confirmation, govern MCP writes.';
+      $('mcp-local-form').addEventListener('submit',async event=>{
+        event.preventDefault();if(!current()||busy)return;
+        const enabled=$('mcp-local-enabled').checked,port=Number($('mcp-local-port').value);
+        if(!Number.isInteger(port)||port<1||port>65535){$('mcp-local-status').textContent='Choose a port from 1 to 65535.';return;}
+        const attempt=++revision;busy=true;controls();clearSecret();
+        try{
+          await api('/api/local/mcp',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({enabled,port})});
+          if(await load(attempt))$('mcp-local-status').textContent='Local MCP settings applied. MCP writes use AI client approvals.';
+        }catch(error){if(current(attempt))$('mcp-local-status').textContent=error.message;}
+        finally{if(current(attempt)){busy=false;controls();}}
+      });
     }
     $('account-settings').addEventListener('click', open);
     $('mcp-close').addEventListener('click', close);

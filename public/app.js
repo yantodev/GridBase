@@ -1,11 +1,13 @@
 'use strict';
 const ACCOUNT_ID = window.GridBaseSession?.user?.id;
-if (typeof ACCOUNT_ID !== 'string' || !/^[1-9][0-9]{0,19}$/.test(ACCOUNT_ID)) throw new Error('Verified GitHub account required');
+const NATIVE = window.GridBaseTransport?.native === true && window.GridBaseSession?.mode === 'local' && window.GridBaseSession?.user?.provider === 'local';
+if (typeof ACCOUNT_ID !== 'string' || !(NATIVE ? /^local:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/ : /^[1-9][0-9]{0,19}$/).test(ACCOUNT_ID)) throw new Error('Verified account required');
+const STORAGE_OWNER = NATIVE ? ACCOUNT_ID : 'github:' + ACCOUNT_ID;
 const C = window.WorkbenchCore;
 const $ = selector => document.querySelector(selector);
-const HISTORY_STORAGE_KEY = 'thrift-query-workbench:history:v1:github:' + ACCOUNT_ID;
-const DRAFT_STORAGE_KEY = 'thrift-query-workbench:drafts:v1:github:' + ACCOUNT_ID;
-const CONNECTIONS_STORAGE_KEY = 'gridbase:connections:v1:github:' + ACCOUNT_ID;
+const HISTORY_STORAGE_KEY = 'thrift-query-workbench:history:v1:' + STORAGE_OWNER;
+const DRAFT_STORAGE_KEY = 'thrift-query-workbench:drafts:v1:' + STORAGE_OWNER;
+const CONNECTIONS_STORAGE_KEY = 'gridbase:connections:v1:' + STORAGE_OWNER;
 const RESULTS_PAGE_SIZE = 10;
 const MAX_HISTORY_ITEMS = 5;
 function readStorage(key) { try { return window.localStorage.getItem(key); } catch { return null; } }
@@ -83,7 +85,11 @@ function restoreFocus(root, work) {
 }
 async function api(url, options = {}) {
   let response;
-  try { response = await fetch(url, options); } catch { throw new Error('Server tidak dapat dijangkau. Periksa server lalu coba kembali.'); }
+  try { response = await (NATIVE ? window.GridBaseTransport.request(url, options) : fetch(url, options)); }
+  catch (error) {
+    if (NATIVE) { const safe = new Error(error.uncertainOutcome === true ? 'Outcome is uncertain. Check the database before retrying this operation.' : error.message || 'Local engine is unavailable.'); safe.code = error.code; safe.uncertainOutcome = error.uncertainOutcome === true; throw safe; }
+    throw new Error('Server tidak dapat dijangkau. Periksa server lalu coba kembali.');
+  }
   const auditIncomplete = response.headers?.get('X-GridBase-Audit-Warning') === 'incomplete';
   if (auditIncomplete) {
     $('#audit-warning').hidden = false;
@@ -665,9 +671,10 @@ async function runQuery(explicitSql) {
   const sql = typeof explicitSql === 'string' ? explicitSql : C.executionSql(editor.value,editor.selectionStart,editor.selectionEnd);
   if(!sql.trim()) { setToast('Write a SQL statement before executing.'); editor.focus(); return; }
   const mutations = C.mutationOperations(sql);
-  if(mutations.length && !window.confirm(`Jalankan ${mutations.join(' / ')} pada koneksi “${tabConnection().name}”?\n\nQuery ini akan mengubah atau menghapus data. Pastikan kondisi WHERE sudah sesuai.\n\n${sql}`)) {
+  if(!NATIVE && mutations.length && !window.confirm(`Jalankan ${mutations.join(' / ')} pada koneksi “${tabConnection().name}”?\n\nQuery ini akan mengubah atau menghapus data. Pastikan kondisi WHERE sudah sesuai.\n\n${sql}`)) {
     setToast('Eksekusi query dibatalkan.'); editor.focus(); return;
   }
+  const prior = {result:tab.result,error:tab.error,output:tab.output,dock:tab.dock,page:tab.page,filter:tab.filter,sort:tab.sort};
   tab.running=true; tab.error=''; tab.result=null; tab.output='Executing…\n\n'+sql; tab.dock='results'; tab.page=1; tab.filter=''; tab.sort=null;
   renderTabs(); renderResults(); updateRunButton();
   try {
@@ -679,7 +686,10 @@ async function runQuery(explicitSql) {
     tab.output = `${new Date().toLocaleTimeString('id-ID')} · ${result.durationMs} ms\n${summary}\n\n${sql}`;
     state.history.unshift({sql,connectionId,rows:result.rows.length,ranAt:Date.now()}); state.history=state.history.slice(0,MAX_HISTORY_ITEMS);saveHistory();renderHistory();
     setToast(tab.name + ' · ' + summary);
-  } catch(error) { tab.error=error.message;tab.output='Execution failed\n'+error.message+'\n\n'+sql;setToast(tab.name+' · Query failed'); }
+  } catch(error) {
+    if(NATIVE && error.code==='USER_CANCELLED'){Object.assign(tab,prior);setToast('Query cancelled. No SQL was sent.');}
+    else {tab.error=error.message;tab.output='Execution failed\n'+error.message+'\n\n'+sql;setToast(tab.name+' · Query failed');}
+  }
   finally {
     tab.running=false;renderTabs();
     if(state.activeId===tab.id){renderResults();updateConnectionUI();}
@@ -688,6 +698,15 @@ async function runQuery(explicitSql) {
 async function exportResult(format) {
   const tab=active(), result=tab.result;if(!result)return;
   const name=tab.name;
+  if(NATIVE) {
+    if(tab.exporting)return;tab.exporting=true;
+    const rowIndices=C.viewRows(result,tab.filter,tab.sort).map(item=>item.index);
+    try {
+      const saved=await window.GridBaseTransport.saveExport({queryRequestId:result.requestId,format,rowIndices,suggestedName:name.replace(/[^a-zA-Z0-9_-]/g,'_').slice(0,150)+'.'+format});
+      setToast(saved.canceled?'Export cancelled.':`${rowIndices.length} rows exported as ${format.toUpperCase()}.`);
+    } catch(error) {setToast('Export cancelled: '+error.message);} finally {tab.exporting=false;}
+    return;
+  }
   const rows=C.viewRows(result,tab.filter,tab.sort).map(item=>item.row);
   const body=format==='csv'?C.toCsv(result.columns,rows):JSON.stringify(rows,null,2);
   try {

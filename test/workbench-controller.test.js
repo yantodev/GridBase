@@ -4,7 +4,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const vm = require('node:vm');
 const C = require('../public/workbench-core');
-function setup({configured=true,offline=false,storage=new Map(),connections,accountId='1001',auditAdmin=false,confirm=()=>true}={}) {
+function setup({configured=true,offline=false,storage=new Map(),connections,accountId='1001',auditAdmin=false,confirm=()=>true,local=false,serialized=false}={}) {
   let sources=(connections || (configured ? [{id:'default',name:'Spark Thrift / Hive',type:'hive'}] : [])).map(item=>({connected:true,...item}));
   const settings=new Map(sources.map(item=>[item.id,{...item,host:'fixture',port:item.type==='mysql'?'3306':'5432',database:'app',username:'fixture',password:'saved-secret',jdbcUrl:item.type==='hive'?'jdbc:hive2://fixture/app;token=saved-token':`jdbc:${item.type}://fixture/app`}]));
   let document;
@@ -78,11 +78,59 @@ function setup({configured=true,offline=false,storage=new Map(),connections,acco
     else throw new Error('Unexpected URL '+url);
     return {ok:true,headers:{get:name=>url==='/api/query'&&auditWarning&&name==='X-GridBase-Audit-Warning'?'incomplete':null},json:async()=>data};
   },Event:class {constructor(type){this.type=type;}},Blob,URL,URLSearchParams});
+  const exports=[];let nativeExport=async()=>({canceled:false});
+  if(local){context.window.GridBaseSession={mode:'local',user:{id:accountId,login:'Local',provider:'local'},capabilities:{auditAdmin:false}};context.window.GridBaseTransport=Object.freeze({native:true,request:(...args)=>context.fetch(...args),saveExport:async payload=>{exports.push(payload);return nativeExport(payload);}});}
+  if(serialized){
+    delete context.window.GridBaseTransport;context.window.location={protocol:'gridbase:',host:'app',pathname:'/index.html'};
+    require('../desktop/test/serialized-bridge.cjs').serializedBridge(context,async(channel,input)=>{
+      try{
+        if(channel==='gridbase:export'){exports.push(input);return {ok:true,value:await nativeExport(input)};}
+        const response=await context.fetch(input.path,{method:input.method,body:input.body});
+        return {ok:true,value:{status:200,headers:{'content-type':'application/json'},body:JSON.stringify(await response.json())}};
+      }catch(error){return {ok:false,error:require('../desktop/host.cjs').safeError(error)};}
+    });
+    context.Headers=Headers;context.TextEncoder=TextEncoder;
+    vm.runInContext(fs.readFileSync('public/runtime-transport.js','utf8'),context);
+  }
   if(fs.existsSync('public/activity.js'))vm.runInContext(fs.readFileSync('public/activity.js','utf8'),context);
   vm.runInContext(fs.readFileSync('public/app.js','utf8'),context);
-  return {context,nodes,storage,requests,confirmations,fixture,settings,setActivity:value=>{activityResponse=value;},setExport:value=>{exportResponse=value;},setAuditWarning:value=>{auditWarning=value;},setDetails:value=>{detailsResponse=value;},setQuery:value=>{queryResponse=value;},setConnect:value=>{connectResponse=value;},setMetadata:value=>{metadataResponse=value;},get:id=>nodes.get('#'+id),read:code=>vm.runInContext(code,context)};
+  return {context,nodes,storage,requests,confirmations,fixture,settings,exports,setNativeExport:fn=>{nativeExport=fn;},setActivity:value=>{activityResponse=value;},setExport:value=>{exportResponse=value;},setAuditWarning:value=>{auditWarning=value;},setDetails:value=>{detailsResponse=value;},setQuery:value=>{queryResponse=value;},setConnect:value=>{connectResponse=value;},setMetadata:value=>{metadataResponse=value;},get:id=>nodes.get('#'+id),read:code=>vm.runInContext(code,context)};
 }
 const flush=async()=>{for(let i=0;i<4;i++)await new Promise(setImmediate);};
+test('native local cache is disjoint from unchanged numeric GitHub keys and rejects counterfeit IDs',async()=>{
+  const storage=new Map(),id='local:11111111-1111-4111-8111-111111111111';
+  const browser=setup({storage,configured:false});await flush();browser.read("active().sql='SELECT browser_private';persistDrafts();");
+  const native=setup({storage,configured:false,local:true,accountId:id});await flush();assert.doesNotMatch(native.read('active().sql'),/browser_private/);native.read("active().sql='SELECT local_private';persistDrafts();");
+  assert.equal(storage.has('thrift-query-workbench:drafts:v1:local:'+id.slice(6)),true);assert.equal(storage.has('thrift-query-workbench:drafts:v1:github:1001'),true);
+  assert.throws(()=>setup({local:true,accountId:'1001'}));
+});
+test('native selected mutation has no renderer prompt, guards duplicate keyboard runs and pins its console',async()=>{
+  const app=setup({local:true,accountId:'local:11111111-1111-4111-8111-111111111111'});await flush();let finish;app.setQuery(new Promise(resolve=>{finish=resolve;}));
+  const editor=app.get('sql-editor');editor.value='SELECT 1;\nWITH r AS (DELETE FROM t RETURNING *) SELECT * FROM r;';editor.setSelectionRange(10,editor.value.length);
+  const pending=app.context.runQuery();await editor.emit('keydown',{key:'Enter',ctrlKey:true});await flush();
+  assert.equal(app.confirmations.length,0);assert.equal(app.requests.filter(r=>r.url==='/api/query').length,1);assert.match(JSON.parse(app.requests.at(-1).options.body).sql,/^WITH/);
+  const origin=app.read('active().id');app.context.addConsole('SELECT other');finish(app.fixture(2));await pending;assert.equal(app.read('active().result'),undefined);app.context.switchTab(origin);assert.equal(app.read('active().result.rows.length'),2);
+});
+test('native export sends only captured query reference and sorted filtered indices without renderer audit or Blob',async()=>{
+  const app=setup({local:true,accountId:'local:11111111-1111-4111-8111-111111111111'});await flush();await app.context.runQuery('SELECT 1');app.read("active().sort={column:'id',direction:-1};active().filter='row 2';");
+  const expected=JSON.parse(app.read('JSON.stringify(C.viewRows(active().result,active().filter,active().sort).map(item=>item.index))'));
+  await app.context.exportResult('json');assert.equal(app.requests.some(r=>r.url==='/api/activity/exports'),false);assert.equal(app.exports.length,1);assert.deepEqual(JSON.parse(JSON.stringify(app.exports[0].rowIndices)),expected);assert.deepEqual(Object.keys(app.exports[0]).sort(),['format','queryRequestId','rowIndices','suggestedName']);assert.equal(app.context.document.body.children.filter(n=>n.tagName==='a').length,0);
+});
+test('I2 serialized preload-to-controller cancellation preserves prior result output and history for both mutations',async()=>{
+  const app=setup({local:true,serialized:true,accountId:'local:11111111-1111-4111-8111-111111111111'});await flush();await app.context.runQuery('SELECT 1');
+  const prior=app.read('JSON.stringify({result:active().result,output:active().output,history:state.history})');
+  for(const sql of ['UPDATE items SET x=2','DELETE FROM items']){
+    app.setQuery(Promise.resolve().then(()=>{throw Object.assign(Error('cancelled'),{code:'USER_CANCELLED'});}));await app.context.runQuery(sql);
+    assert.equal(app.read('JSON.stringify({result:active().result,output:active().output,history:state.history})'),prior);assert.equal(app.read('active().running'),false);assert.equal(app.read('active().error'),'');
+  }
+  app.setQuery(Promise.resolve().then(()=>{throw Object.assign(Error('/private/raw'),{uncertainOutcome:true});}));
+  await assert.rejects(app.context.window.GridBaseTransport.request('/api/query',{method:'POST',body:'{"sql":"UPDATE items SET x=2"}'}),e=>e.code==='REQUEST_FAILED'&&e.uncertainOutcome===true);
+  app.setQuery(Promise.resolve().then(()=>{throw Object.assign(Error('/private/raw'),{uncertainOutcome:true});}));await app.context.runQuery('UPDATE items SET x=2');assert.match(app.read('active().error'),/check.*database.*before.*retry/i);assert.equal(app.read('state.history.length'),1);
+});
+test('native uncertain write error stays actionable without retry or history entry',async()=>{
+  const app=setup({local:true,accountId:'local:11111111-1111-4111-8111-111111111111'});await flush();app.setQuery(Promise.resolve().then(()=>{throw Object.assign(Error('Local request failed.'),{uncertainOutcome:true});}));await app.context.runQuery('UPDATE t SET x=1');
+  assert.match(app.read('active().error'),/check.*database.*before.*retry/i);assert.equal(app.requests.filter(r=>r.url==='/api/query').length,1);assert.equal(app.read('state.history.length'),0);
+});
 test('drafts, SQL history and cached connections are private to the verified account',async()=>{
   const storage=new Map();
   const alice=setup({configured:false,storage,accountId:'1001'});await flush();
@@ -431,6 +479,11 @@ test('Activity opens own server history using safe text and preserves the SQL co
   assert.equal(app.nodes.get('.workbench').hidden,false);assert.equal(app.get('sql-editor').value,'SELECT private_draft');
 });
 
+test('native activity labels local actors without GitHub prefix and retains MCP source distinction',async()=>{
+  const app=setup({local:true,accountId:'local:11111111-1111-4111-8111-111111111111'});await flush();
+  app.setActivity(async()=>({events:[{userId:'local:11111111-1111-4111-8111-111111111111',login:'Local',source:'mcp',requestId:'local-event',action:'query.execute',sqlText:'SELECT 1',outcome:'success'}],nextCursor:null}));
+  await app.get('activity-tool').click();await flush();const row=app.get('activity-table').children[1].children[0];assert.equal(row.children[1].textContent,'Local');await row.children[6].children[0].click();assert.match(app.get('activity-detail').textContent,/Sumber: mcp/);assert.doesNotMatch(app.get('activity-detail').textContent,/@Local/);
+});
 test('Activity displays SQL text safely only for query events and handles historical records',async()=>{
   const app=setup();await flush();
   const sql="UPDATE fixture SET name='<img src=x onerror=alert(1)>'\nWHERE id=1;";

@@ -7,6 +7,9 @@
     if (text !== undefined) result.textContent = String(text);
     return result;
   }
+  function actorLabel(event) {
+    return typeof event.userId==='string' && /^local:[0-9a-f-]{36}$/.test(event.userId) ? 'Local' : event.login ? '@'+event.login : 'Belum terverifikasi';
+  }
   function mount({api,user,capabilities}) {
     const $ = id => document.querySelector('#activity-' + id);
     const admin = capabilities?.auditAdmin === true;
@@ -26,7 +29,7 @@
     }
     function details(event) {
       $('detail').textContent = [
-        'Request ID: ' + event.requestId, 'Akun: ' + (event.login ? '@' + event.login : 'Belum terverifikasi') + ' · ' + (event.userId || '—'),
+        'Request ID: ' + event.requestId, 'Akun: ' + actorLabel(event) + ' · ' + (event.userId || '—'),
         'Mulai UTC: ' + event.startedAt, 'Selesai UTC: ' + (event.finishedAt || 'Belum tercatat'),
         'Status: ' + (outcomes[event.outcome] || event.outcome), 'HTTP: ' + (event.httpStatus ?? '—'),
         'Kode: ' + (event.code || '—'), 'Sumber: ' + event.source, 'Baris hasil: ' + (event.returnedRows ?? '—'),
@@ -43,7 +46,7 @@
       const body = node('tbody');
       for (const event of events) {
         const row = node('tr');
-        for (const value of [event.startedAt,event.login ? '@' + event.login : 'Belum terverifikasi',event.action + (event.sqlOperation ? ' · ' + event.sqlOperation : ''),event.connectionId || '—',outcomes[event.outcome] || event.outcome,event.durationMs == null ? '—' : event.durationMs + ' ms']) row.append(node('td',value));
+        for (const value of [event.startedAt,actorLabel(event),event.action + (event.sqlOperation ? ' · ' + event.sqlOperation : ''),event.connectionId || '—',outcomes[event.outcome] || event.outcome,event.durationMs == null ? '—' : event.durationMs + ' ms']) row.append(node('td',value));
         const cell = node('td'), button = node('button','Detail'); button.type = 'button'; button.className = 'text-button';
         button.addEventListener('click',()=>details(event)); cell.append(button); row.append(cell); body.append(row);
       }

@@ -1,0 +1,15 @@
+{
+  "name": "gridbase-desktop",
+  "version": "1.4.0",
+  "private": true,
+  "description": "Sandboxed GridBase local desktop shell (source component; native acceptance pending).",
+  "main": "main.cjs",
+  "scripts": {
+    "test": "node --test test/*.test.cjs",
+    "test:e2e": "node --test test/desktop.e2e.cjs"
+  },
+  "devDependencies": {
+    "electron": "45.4.1",
+    "playwright": "1.65.1"
+  }
+}
